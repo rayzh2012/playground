@@ -52,3 +52,5 @@ jobs:
           git add artifacts/26histories
           git commit -m 'chore: persist 26 Histories corpus and results [skip ci]' || exit 0
           git push origin HEAD:26histories-corpus
+
+# trigger: workflow registered on default branch
