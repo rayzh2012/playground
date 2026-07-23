@@ -7,6 +7,12 @@ on:
     paths:
       - tools/build_26histories_bundle.py
       - .github/workflows/build-26histories.yml
+  pull_request:
+    branches:
+      - master
+    paths:
+      - tools/build_26histories_bundle.py
+      - .github/workflows/build-26histories.yml
   workflow_dispatch:
 
 permissions:
@@ -17,7 +23,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - name: Checkout
+      - name: Checkout analysis branch
         uses: actions/checkout@v4
         with:
           ref: 26histories-corpus
@@ -38,7 +44,7 @@ jobs:
           retention-days: 90
           compression-level: 0
 
-      - name: Persist corpus bundle and results on branch
+      - name: Persist corpus bundle and results on analysis branch
         run: |
           mkdir -p artifacts/26histories
           cp 26histories_output/26histories_corpus_v1.zip artifacts/26histories/
