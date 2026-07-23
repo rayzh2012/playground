@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """Build a durable Twenty-Six Histories corpus bundle and frequency results."""
+# Trigger PR-based artifact build for ChatGPT local download.
 from __future__ import annotations
 
 from collections import defaultdict
@@ -78,7 +79,6 @@ def download(book_id: str, name: str) -> Path:
     local = CORPUS / filename
     if local.exists() and local.stat().st_size > 1000:
         return local
-    # Important fix: encode the entire Chinese path, including the 26史 directory.
     url = RAW_ROOT + quote(f"26史/{filename}")
     req = Request(url, headers={"User-Agent": "Mozilla/5.0 26histories-corpus-builder"})
     last = None
