@@ -1,0 +1,54 @@
+name: Build durable 26 Histories corpus
+
+on:
+  push:
+    branches:
+      - 26histories-corpus
+    paths:
+      - tools/build_26histories_bundle.py
+      - .github/workflows/build-26histories.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: 26histories-corpus
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Download corpus and run analysis
+        run: python tools/build_26histories_bundle.py
+
+      - name: Upload reusable artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: 26histories-corpus-and-results
+          path: 26histories_output/
+          retention-days: 90
+          compression-level: 0
+
+      - name: Persist corpus bundle and results on branch
+        run: |
+          mkdir -p artifacts/26histories
+          cp 26histories_output/26histories_corpus_v1.zip artifacts/26histories/
+          cp 26histories_output/26histories_symbol_results_v1.zip artifacts/26histories/
+          cp 26histories_output/manifest.json artifacts/26histories/
+          cp 26histories_output/results/by_book.csv artifacts/26histories/
+          cp 26histories_output/results/by_era.csv artifacts/26histories/
+          cp 26histories_output/results/totals.csv artifacts/26histories/
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add artifacts/26histories
+          git commit -m 'chore: persist 26 Histories corpus and results [skip ci]' || exit 0
+          git push origin HEAD:26histories-corpus
