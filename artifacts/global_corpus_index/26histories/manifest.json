@@ -11,8 +11,8 @@
   "lexical_strategy": "contentless SQLite FTS5 over CJK character-position tokens",
   "locator_contract": "source_file + unit_no + locator_type + sha1",
   "raw_corpus_mutated": false,
-  "created_utc": "2026-08-29T01:21:32Z",
-  "elapsed_seconds": 19.251,
+  "created_utc": "2026-08-29T01:33:06Z",
+  "elapsed_seconds": 19.563,
   "outputs": {
     "lexical_index": "lexical_index.sqlite",
     "source_manifest": "source_manifest.csv",
