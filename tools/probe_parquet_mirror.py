@@ -18,7 +18,8 @@ TARGETS = [
     {
         'corpus_id': 'GCI-HOLD-0001',
         'repo_id': 'Geralt-Targaryen/Literature-zh',
-        'basename': 'literature_zh-00233-of-00233.parquet',
+        'drive_basename': 'literature_zh-00233-of-00233.parquet',
+        'source_suffix': 'literature_zh-00233-of-00233.parquet',
         'drive_file_id': '1rCZaQhYD0jYaFTEz4mMS_JcASLf_CraN',
         'drive_size': 80314697,
         'drive_sha256': 'd452713dfc7fecf65e713541a5c85c2f772f51e46b5cd3d6bb34b0aff3b6693e',
@@ -26,7 +27,8 @@ TARGETS = [
     {
         'corpus_id': 'GCI-HOLD-0002',
         'repo_id': 'Morton-Li/ChineseWebText2.0-HighQuality',
-        'basename': 'data__CASIA-LM_ChineseWebText2.0_partial-001553.parquet',
+        'drive_basename': 'data__CASIA-LM_ChineseWebText2.0_partial-001553.parquet',
+        'source_suffix': 'partial-001553.parquet',
         'drive_file_id': '1QOlPzxwZHkuf8S3GqY0MS1qgrjfGx8O6',
         'drive_size': 252467982,
         'drive_sha256': '3c32c7e566b7fd103b18bbdcb9d6e5c98f1ec3d0b9f8a7c1b0d2a973a8e871ef',
@@ -40,15 +42,29 @@ def sha256(path: Path) -> str:
             h.update(b)
     return h.hexdigest()
 
+def resolve_source_path(files: list[str], target: dict) -> str:
+    exact=[x for x in files if Path(x).name == target['drive_basename']]
+    if len(exact)==1:
+        return exact[0]
+    suffix=[x for x in files if x.endswith(target['source_suffix'])]
+    if len(suffix)==1:
+        return suffix[0]
+    # Diagnostic fallback for renamed/flattened Drive imports.
+    ordinal=target['source_suffix'].split('-')[-1].replace('.parquet','')
+    fuzzy=[x for x in files if ordinal in x and x.endswith('.parquet')]
+    if len(fuzzy)==1:
+        return fuzzy[0]
+    raise RuntimeError(
+        f"Expected one HF source for {target['drive_basename']}; "
+        f"suffix={target['source_suffix']}; candidates={fuzzy[:20]}"
+    )
+
 def main():
     report=[]
     occ_rows=[]
     for t in TARGETS:
         files=list_repo_files(t['repo_id'], repo_type='dataset')
-        matches=[x for x in files if Path(x).name == t['basename']]
-        if len(matches) != 1:
-            raise RuntimeError(f"Expected exactly one source file for {t['basename']}, got {matches[:10]}")
-        source_path=matches[0]
+        source_path=resolve_source_path(files,t)
         local=Path(hf_hub_download(repo_id=t['repo_id'], repo_type='dataset', filename=source_path))
         nbytes=local.stat().st_size
         digest=sha256(local)
@@ -81,7 +97,7 @@ def main():
         for term in TERMS:
             for item in contexts[term]:
                 occ_rows.append([
-                    t['corpus_id'], t['basename'], term, counts[term],
+                    t['corpus_id'], t['drive_basename'], term, counts[term],
                     item['row_no'], item['context']
                 ])
         report.append({
@@ -98,11 +114,12 @@ def main():
             'pilot_term_counts': counts,
         })
         print(json.dumps({
-            'corpus_id':t['corpus_id'], 'file':t['basename'], 'rows':pf.metadata.num_rows,
+            'corpus_id':t['corpus_id'], 'drive_file':t['drive_basename'],
+            'hf_source_path':source_path, 'rows':pf.metadata.num_rows,
             'mirror_match':mirror_match, 'counts':counts
         }, ensure_ascii=False), flush=True)
         if not mirror_match:
-            raise RuntimeError(f"Public source != Drive mirror for {t['basename']}")
+            raise RuntimeError(f"Public source != Drive mirror for {t['drive_basename']}")
 
     (OUT/'parquet_mirror_probe.json').write_text(json.dumps(report,ensure_ascii=False,indent=2),encoding='utf-8')
     with (OUT/'pilot_occurrences.csv').open('w',encoding='utf-8-sig',newline='') as f:
