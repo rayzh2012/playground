@@ -44,12 +44,7 @@ jobs:
           assert any(e['polarity']=='IDENTITY_OPPOSE' for e in edges)
           assert any(e['layer']=='ORIGINAL_TEXT' and e['source']=='赤帝' and e['target']=='蚩尤' for e in edges)
       - name: Gate
-        run: python - <<'PY'
-          import json
-          m=json.load(open('out/manifest.json'))
-          assert m['edge_count']==14
-          print('EARLY_WITNESS_GRAPH_GATE=PASS')
-          PY
+        run: python -c "import json; m=json.load(open('out/manifest.json')); assert m['edge_count']==14; print('EARLY_WITNESS_GRAPH_GATE=PASS')"
       - uses: actions/upload-artifact@v4
         with:
           name: chiyou-early-witness-graph
