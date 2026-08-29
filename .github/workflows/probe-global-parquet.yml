@@ -1,0 +1,78 @@
+name: Probe Global Parquet Mirrors
+
+on:
+  push:
+    branches:
+      - master
+    paths:
+      - .github/workflows/probe-global-parquet.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  parquet-probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - name: Checkout indexing branch
+        uses: actions/checkout@v4
+        with:
+          ref: global-corpus-index-v1
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install streaming dependencies
+        run: python -m pip install --disable-pip-version-check 'huggingface_hub[hf_xet]' 'pyarrow>=23,<24'
+
+      - name: Syntax gate
+        run: python -m py_compile tools/probe_parquet_mirror.py
+
+      - name: Verify public source mirrors and scan pilot shards
+        run: |
+          rm -rf global_index_output/parquet_probe
+          python tools/probe_parquet_mirror.py
+
+      - name: Acceptance gates
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          p=Path('global_index_output/parquet_probe/parquet_mirror_probe.json')
+          data=json.loads(p.read_text(encoding='utf-8'))
+          assert len(data)==2, data
+          for r in data:
+              assert r['drive_mirror_byte_identical'] is True, r
+              assert r['text_column']=='text', r
+              assert r['parquet_rows'] > 0, r
+              assert r['row_groups'] > 0, r
+          print([{
+              'corpus':r['corpus_id'],'rows':r['parquet_rows'],
+              'row_groups':r['row_groups'],'counts':r['pilot_term_counts']
+          } for r in data])
+          PY
+
+      - name: Upload probe artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: global-parquet-mirror-probe
+          path: global_index_output/parquet_probe/
+          retention-days: 90
+
+      - name: Persist probe manifests on analysis branch
+        run: |
+          mkdir -p artifacts/global_corpus_index/parquet_probe
+          cp global_index_output/parquet_probe/parquet_mirror_probe.json artifacts/global_corpus_index/parquet_probe/
+          cp global_index_output/parquet_probe/pilot_occurrences.csv artifacts/global_corpus_index/parquet_probe/
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add artifacts/global_corpus_index/parquet_probe
+          git commit -m 'chore: persist parquet mirror probe [skip ci]' || true
+          git fetch origin global-corpus-index-v1
+          git rebase origin/global-corpus-index-v1
+          git push origin HEAD:global-corpus-index-v1
