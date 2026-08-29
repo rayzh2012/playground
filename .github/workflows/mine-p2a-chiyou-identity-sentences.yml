@@ -1,0 +1,94 @@
+name: Mine P2A Chiyou Identity Sentences
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - .github/workflows/mine-p2a-chiyou-identity-sentences.yml
+  workflow_dispatch:
+permissions:
+  actions: read
+  contents: read
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      GH_TOKEN: ${{ github.token }}
+      SOURCE_ARTIFACT_ID: '9707827019'
+      SOURCE_SIZE: '4381625928'
+      SOURCE_SHA256: '84581c47f1b3fcb29f3a311b28b29cfdb36d2b84ba538507e54daf4445fa6a4b'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.11'}
+      - run: python -m pip install --disable-pip-version-check 'pyarrow>=23,<24'
+      - name: Download canonical P2A
+        run: |
+          set -euo pipefail
+          gh api --method GET -H 'Accept: application/vnd.github+json' \
+            "/repos/${GITHUB_REPOSITORY}/actions/artifacts/${SOURCE_ARTIFACT_ID}/zip" > p2a-final.zip
+          test "$(stat -c%s p2a-final.zip)" = "$SOURCE_SIZE"
+          echo "$SOURCE_SHA256  p2a-final.zip" | sha256sum -c -
+          mkdir index && unzip -q p2a-final.zip -d index
+      - name: Explicit relationship sentence audit
+        run: |
+          mkdir out
+          python - <<'PY'
+          import re,csv,json,hashlib
+          from pathlib import Path
+          from collections import Counter
+          import pyarrow.dataset as ds
+          ROOT=Path('index');OUT=Path('out')
+          def safe(a):
+              bad='\\/:*?"<>|\x00\n\r\t';n=''.join('_' if c in bad else c for c in a).strip('. ');return (n or 'EMPTY')+'.parquet'
+          t=ds.dataset(ROOT/'by_alias'/safe('蚩尤'),format='parquet').to_table()
+          rows=[r for r in t.to_pylist() if not bool(r.get('hard_false_positive',False))]
+          tests={
+            'JIULI_LORD_TITLE':[r'蚩尤.{0,24}(九黎之君|九黎君|为九黎之君|為九黎之君|九黎.*首领|九黎.*首領)',r'(九黎之君|九黎君).{0,24}蚩尤',r'九黎.{0,20}(蚩尤之徒|蚩尤.*之徒)',r'蚩尤.{0,20}(九黎之徒|九黎.*首领|九黎.*首領)'],
+            'JIULI_MIAOMIN_LINEAGE':[r'九黎.{0,40}(三苗|苗民)',r'(三苗|苗民).{0,40}九黎',r'蚩尤.{0,40}(三苗|苗民)',r'(三苗|苗民).{0,40}蚩尤'],
+            'BANQUAN_EQUALS_ZHUOLU':[r'阪泉.{0,30}(即|就是|亦即|亦为|亦為|同|一作|又称|又稱|别称|別稱).{0,30}涿鹿',r'涿鹿.{0,30}(即|就是|亦即|亦为|亦為|同|一作|又称|又稱|别称|別稱).{0,30}阪泉',r'(阪泉|涿鹿).{0,25}(同地|一地|一战|一戰|同一场战争|同一場戰爭)'],
+            'CHIDI_EQUALS_YANDI_EXPLICIT':[r'赤帝.{0,30}(即|就是|亦即|亦曰|又称|又稱|指|乃|为|為).{0,20}炎帝',r'炎帝.{0,30}(即|就是|亦即|亦曰|又称|又稱|指|乃|为|為).{0,20}赤帝'],
+          }
+          source_marks=[('CHANGMAI',r'逸周书|逸周書|尝麦|嘗麥'),('SHANGSHU_LVXING',r'尚书|尚書|吕刑|呂刑'),('GUOYU_WEIZHAO',r'国语|國語|楚语|楚語|韦昭|韋昭'),('M融',r'马融|馬融'),('LUSHI',r'路史'),('SHIJI',r'史记|史記'),('XUXUSHENG',r'徐旭生'),('ZHANGSHOUJIE',r'张守节|張守節'),('SONGZHONG',r'宋衷|世本')]
+          punct=re.compile(r'[\s\u3000，。！？；：、“”‘’（）()《》〈〉\[\]【】—…·,.!?;:\-]')
+          def fam(ctx):
+              h=[n for n,p in source_marks if re.search(p,ctx)];return '+'.join(h[:4]) if h else 'UNATTRIBUTED'
+          summary=[];samples=[]
+          for name,pats in tests.items():
+              regs=[re.compile(p) for p in pats];hits=[]
+              for r in rows:
+                  c=r.get('context') or ''
+                  if any(x.search(c) for x in regs):hits.append(r)
+              fp=set();src=set();families=Counter();corp=Counter()
+              for r in hits:
+                  c=r.get('context') or '';norm=punct.sub('',c);norm=re.sub(r'\d+','',norm)
+                  fp.add(hashlib.sha1(norm[:600].encode()).hexdigest());src.add((r.get('corpus_id'),r.get('source_path')));families[fam(c)]+=1;corp[r.get('corpus_id')]+=1
+              summary.append({'test':name,'hits':len(hits),'dedup_contexts':len(fp),'distinct_source_paths':len(src),'literature_hits':corp.get('GCI-HOLD-0001',0),'cwt_hits':corp.get('GCI-HOLD-0002',0),'families':json.dumps(families.most_common(20),ensure_ascii=False)})
+              seen=set();per=Counter()
+              for r in hits:
+                  c=r.get('context') or '';f=fam(c);k=(f,c)
+                  if k in seen or per[f]>=12:continue
+                  seen.add(k);per[f]+=1;samples.append({'test':name,'family':f,'corpus_id':r.get('corpus_id'),'source_path':r.get('source_path'),'row_no':r.get('row_no'),'context':c})
+          with (OUT/'identity_summary.csv').open('w',encoding='utf-8-sig',newline='') as f:
+              w=csv.DictWriter(f,fieldnames=list(summary[0]));w.writeheader();w.writerows(summary)
+          with (OUT/'identity_samples.jsonl').open('w',encoding='utf-8') as f:
+              for x in samples:f.write(json.dumps(x,ensure_ascii=False)+'\n')
+          (OUT/'manifest.json').write_text(json.dumps({'schema':'P2A-CHIYOU-IDENTITY-SENTENCE-1.0','warning':'Regex retrieval identifies explicit relation sentences; source-family labels are heuristic and require sample inspection.'},ensure_ascii=False,indent=2),encoding='utf-8')
+          print(json.dumps(summary,ensure_ascii=False,indent=2))
+          PY
+      - name: Gate
+        run: |
+          python - <<'PY'
+          import csv
+          from pathlib import Path
+          r=list(csv.DictReader(Path('out/identity_summary.csv').open(encoding='utf-8-sig')))
+          assert len(r)==4
+          assert {x['test'] for x in r}=={'JIULI_LORD_TITLE','JIULI_MIAOMIN_LINEAGE','BANQUAN_EQUALS_ZHUOLU','CHIDI_EQUALS_YANDI_EXPLICIT'}
+          print({'tests':4,'gate':'PASS'})
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: p2a-chiyou-identity-sentence-audit
+          path: out/
+          retention-days: 90
