@@ -1,0 +1,35 @@
+canonical_entity	alias	entity_type	notes
+蚩尤	蚩尤	POLITICAL_LABEL/HOLDER?	Split CHIYOU_A/B/C before merge
+炎帝	炎帝	FOUNDER/HOUSE/TITLE	Do not assume one biological person
+炎帝	赤帝	POSSIBLE_ALIAS/OFFICE	Keep relation explicit by source
+黄帝	黄帝	FOUNDER/HOUSE/OFFICE	Founder/House/Office layers
+黄帝	黄帝氏	HOUSE/POLITY	Do not collapse to individual automatically
+黄帝	轩辕	HOLDER/NAME	Identity strength source-dependent
+黄帝	轩辕氏	HOUSE/ALIAS	Alias Accretion Test applies
+黄帝	有熊氏	POLITY/HOUSE	Political acquisition vs birth lineage unresolved
+帝鸿	帝鸿	HOLDER/HOUSE	Keep Huangdi relation open
+帝鸿	帝鸿氏	HOUSE	Independent-node possibility
+帝江	帝江	DEITY/ENTITY	Do not auto-merge 帝鸿
+共工	共工	HOLDER/HOUSE/TITLE	Multi-holder model
+共工	共工氏	HOUSE/POLITY	Role/house/person separated
+少昊	少昊	HOLDER/HOUSE	Bird-system associations source-dependent
+少昊	少皞	ORTHOGRAPHIC_ALIAS	Track graph form
+太昊	太昊	HOLDER/HOUSE	Keep distinct from Fuxi unless evidence
+太昊	太皞	ORTHOGRAPHIC_ALIAS	Track graph form
+颛顼	颛顼	HOLDER/HOUSE	Enemy-vs-descendant traditions must split
+神农	神农	HOLDER/HOUSE/TITLE	Do not auto-equate with 炎帝
+榆罔	榆罔	HOLDER	Yandi-holder candidate
+九黎	九黎	POLITY/HOUSE	Relation to Chiyou source-dependent
+阪泉	阪泉	PLACE/POLITY	Do not auto-equate with a person
+涿鹿	涿鹿	PLACE	War-location traditions
+应龙	应龙	DEITY/HOLDER?	Occurrence index seed
+风伯	风伯	OFFICE/DEITY	Occurrence index seed
+雨师	雨师	OFFICE/DEITY	Occurrence index seed
+女娲	女娲	DEITY/HOLDER	Keep 女娃 separate by default
+女娃	女娃	PERSON/DEITY?	Keep 女娲 separate by default
+精卫	精卫	DEITY/BIRD	Entity relation open
+后土	后土	OFFICE/DEITY/HOLDER	Separate title and holder
+句龙	句龙	HOLDER/OFFICE	Relation to 后土 explicit
+鲧	鲧	HOLDER	Transformation variants separate
+禹	禹	HOLDER	Lineage/title issues source-dependent
+缙云	缙云氏	POLITY/OFFICE/HOUSE	Negative-control alias accretion case
