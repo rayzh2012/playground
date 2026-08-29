@@ -1,0 +1,180 @@
+name: Mine P2A Entities Phase 1
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - .github/workflows/mine-p2a-entities-phase1.yml
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  mine:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      GH_TOKEN: ${{ github.token }}
+      SOURCE_ARTIFACT_ID: '9707827019'
+      SOURCE_RUN_ID: '33228804380'
+      SOURCE_SIZE: '4381625928'
+      SOURCE_SHA256: '84581c47f1b3fcb29f3a311b28b29cfdb36d2b84ba538507e54daf4445fa6a4b'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: global-corpus-index-v1
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install mining dependency
+        run: python -m pip install --disable-pip-version-check 'pyarrow>=23,<24'
+      - name: Download and verify canonical P2A artifact
+        run: |
+          set -euo pipefail
+          gh api --method GET -H 'Accept: application/vnd.github+json' \
+            "/repos/${GITHUB_REPOSITORY}/actions/artifacts/${SOURCE_ARTIFACT_ID}/zip" > p2a-final.zip
+          test "$(stat -c%s p2a-final.zip)" = "$SOURCE_SIZE"
+          echo "$SOURCE_SHA256  p2a-final.zip" | sha256sum -c -
+          mkdir -p index
+          unzip -q p2a-final.zip -d index
+          test -f index/manifest.json
+          test -d index/by_alias
+      - name: Run research-safe blind mining
+        run: |
+          mkdir -p mining_out
+          python - <<'PY'
+          from __future__ import annotations
+          import csv, json, math
+          from collections import Counter, defaultdict
+          from pathlib import Path
+          import pyarrow.dataset as ds
+
+          ROOT=Path('index')
+          OUT=Path('mining_out')
+          CORPUS_NAMES={'GCI-HOLD-0001':'Literature-zh','GCI-HOLD-0002':'ChineseWebText2.0-HQ'}
+          TARGETS={
+              '蚩尤':['炎帝','赤帝','神农','榆罔','九黎','阪泉','涿鹿','黄帝','黄帝氏','轩辕氏','有熊氏','帝鸿','帝鸿氏'],
+              '帝鸿':['黄帝','黄帝氏','少昊','帝江','混沌','白民','缙云氏','颛顼','蚩尤','炎帝'],
+              '帝鸿氏':['黄帝','黄帝氏','少昊','帝江','混沌','白民','缙云氏','颛顼','蚩尤','炎帝'],
+              '黄帝氏':['蚩尤','炎帝','赤帝','神农','榆罔','九黎','阪泉','涿鹿','帝鸿','帝鸿氏','有熊氏','轩辕氏','缙云氏']
+          }
+
+          def safe_alias_filename(alias:str)->str:
+              bad='\\/:*?"<>|\x00\n\r\t'
+              name=''.join('_' if ch in bad else ch for ch in alias).strip('. ')
+              return (name or 'EMPTY')+'.parquet'
+
+          alias_summary=[]
+          pair_summary=[]
+          pair_samples=[]
+          source_rows=[]
+
+          for alias,terms in TARGETS.items():
+              path=ROOT/'by_alias'/safe_alias_filename(alias)
+              if not path.exists():
+                  raise RuntimeError(f'missing alias index: {path}')
+              table=ds.dataset(path,format='parquet').to_table()
+              cols=table.column_names
+              rows=table.to_pylist()
+              raw_n=len(rows)
+              research=[r for r in rows if not bool(r.get('hard_false_positive',False))]
+              hard_fp=raw_n-len(research)
+              by_corpus=Counter(r.get('corpus_id') for r in research)
+              distinct_rows={(r.get('corpus_id'),r.get('source_path'),r.get('row_no')) for r in research}
+              contexts=[r.get('context') or '' for r in research]
+              unique_contexts=set(contexts)
+              shard_counts=Counter((r.get('corpus_id'),r.get('shard_ordinal'),r.get('source_path')) for r in research)
+              n=max(1,len(research))
+              hhi=sum((c/n)**2 for c in shard_counts.values())
+              max_shard=max(shard_counts.values()) if shard_counts else 0
+              precisions=Counter((r.get('retrieval_precision') or 'UNCLASSIFIED') for r in research)
+              alias_summary.append({
+                  'alias':alias,'raw_occurrences':raw_n,'research_occurrences':len(research),
+                  'hard_false_positive':hard_fp,'literature_occurrences':by_corpus.get('GCI-HOLD-0001',0),
+                  'cwt_occurrences':by_corpus.get('GCI-HOLD-0002',0),'distinct_rows':len(distinct_rows),
+                  'unique_contexts':len(unique_contexts),
+                  'occurrences_per_unique_context':round(len(research)/max(1,len(unique_contexts)),6),
+                  'shard_hhi':round(hhi,8),'max_shard_share':round(max_shard/n,8),
+                  'precision_classes':json.dumps(precisions,ensure_ascii=False,sort_keys=True)
+              })
+              for (corpus,ord_,source),cnt in shard_counts.most_common(25):
+                  source_rows.append({'alias':alias,'corpus_id':corpus,'corpus':CORPUS_NAMES.get(corpus,corpus),
+                                      'shard_ordinal':ord_,'source_path':source,'research_occurrences':cnt,
+                                      'share_of_alias':round(cnt/n,8)})
+
+              for term in terms:
+                  hits=[r for r in research if term in (r.get('context') or '')]
+                  hit_by_corpus=Counter(r.get('corpus_id') for r in hits)
+                  hit_rows={(r.get('corpus_id'),r.get('source_path'),r.get('row_no')) for r in hits}
+                  hit_contexts=set((r.get('context') or '') for r in hits)
+                  pair_summary.append({
+                      'alias':alias,'co_term':term,'research_occurrence_hits':len(hits),
+                      'distinct_rows':len(hit_rows),'unique_contexts':len(hit_contexts),
+                      'literature_hits':hit_by_corpus.get('GCI-HOLD-0001',0),
+                      'cwt_hits':hit_by_corpus.get('GCI-HOLD-0002',0),
+                      'share_of_alias_occurrences':round(len(hits)/max(1,len(research)),8)
+                  })
+                  seen=set(); per_corpus=Counter()
+                  for r in hits:
+                      ctx=r.get('context') or ''
+                      key=(r.get('corpus_id'),ctx)
+                      if key in seen: continue
+                      corpus=r.get('corpus_id')
+                      if per_corpus[corpus]>=20: continue
+                      seen.add(key); per_corpus[corpus]+=1
+                      pair_samples.append({
+                          'alias':alias,'co_term':term,'corpus_id':corpus,
+                          'corpus':CORPUS_NAMES.get(corpus,corpus),'shard_ordinal':r.get('shard_ordinal'),
+                          'source_path':r.get('source_path'),'row_no':r.get('row_no'),
+                          'match_start':r.get('match_start'),'match_end':r.get('match_end'),
+                          'retrieval_precision':r.get('retrieval_precision'),'context':ctx
+                      })
+
+          def write_csv(name,rows):
+              p=OUT/name
+              if not rows: p.write_text('',encoding='utf-8'); return
+              with p.open('w',encoding='utf-8-sig',newline='') as f:
+                  w=csv.DictWriter(f,fieldnames=list(rows[0].keys())); w.writeheader(); w.writerows(rows)
+
+          write_csv('alias_summary.csv',alias_summary)
+          write_csv('pair_summary.csv',pair_summary)
+          write_csv('top_shards.csv',source_rows)
+          with (OUT/'pair_samples.jsonl').open('w',encoding='utf-8') as f:
+              for r in pair_samples: f.write(json.dumps(r,ensure_ascii=False)+'\n')
+          manifest={
+              'schema_version':'P2A-ENTITY-MINING-PHASE1-1.0',
+              'source_run_id':int(__import__('os').environ['SOURCE_RUN_ID']),
+              'source_artifact_id':int(__import__('os').environ['SOURCE_ARTIFACT_ID']),
+              'source_size_bytes':int(__import__('os').environ['SOURCE_SIZE']),
+              'source_sha256':__import__('os').environ['SOURCE_SHA256'],
+              'view':'RESEARCH_OCCURRENCE (hard_false_positive excluded only)',
+              'targets':list(TARGETS),'pair_count':len(pair_summary),
+              'sample_policy':'max 20 exact-deduplicated contexts per corpus per alias/co_term',
+              'warning':'Counts measure retrieval/co-occurrence in saved context windows, not historical support strength or source independence.'
+          }
+          (OUT/'manifest.json').write_text(json.dumps(manifest,ensure_ascii=False,indent=2),encoding='utf-8')
+          print(json.dumps({'alias_summary':alias_summary,'top_pairs':sorted(pair_summary,key=lambda x:x['research_occurrence_hits'],reverse=True)[:30]},ensure_ascii=False,indent=2))
+          PY
+      - name: Validate phase-1 output
+        run: |
+          python - <<'PY'
+          import csv,json
+          from pathlib import Path
+          m=json.loads(Path('mining_out/manifest.json').read_text(encoding='utf-8'))
+          a=list(csv.DictReader(Path('mining_out/alias_summary.csv').open(encoding='utf-8-sig')))
+          p=list(csv.DictReader(Path('mining_out/pair_summary.csv').open(encoding='utf-8-sig')))
+          assert m['view'].startswith('RESEARCH_OCCURRENCE')
+          assert {r['alias'] for r in a}=={'蚩尤','帝鸿','帝鸿氏','黄帝氏'}
+          assert len(p)==sum([13,10,10,13])
+          assert all(int(r['research_occurrences'])>0 for r in a)
+          print({'aliases':len(a),'pairs':len(p),'phase1_gate':'PASS'})
+          PY
+      - name: Upload compact mining result
+        uses: actions/upload-artifact@v4
+        with:
+          name: p2a-entity-mining-phase1
+          path: mining_out/
+          retention-days: 90
+          compression-level: 6
