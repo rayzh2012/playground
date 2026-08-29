@@ -10,30 +10,36 @@ permissions:
 jobs:
   audit:
     runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      GH_TOKEN: ${{ github.token }}
+      SOURCE_ARTIFACT_ID: '9707827019'
+      SOURCE_SIZE: '4381625928'
+      SOURCE_SHA256: '84581c47f1b3fcb29f3a311b28b29cfdb36d2b84ba538507e54daf4445fa6a4b'
     steps:
       - uses: actions/checkout@v4
       - name: Install
         run: python -m pip install --disable-pip-version-check 'pyarrow>=23,<24'
       - name: Download canonical P2A artifact
-        env:
-          GH_TOKEN: ${{ github.token }}
         run: |
-          python - <<'PY'
-          import urllib.request, json, zipfile, pathlib, os
-          req=urllib.request.Request('https://api.github.com/repos/rayzh2012/playground/actions/artifacts/9707827019/zip',headers={'Authorization':'Bearer '+os.environ['GH_TOKEN'],'Accept':'application/vnd.github+json'})
-          data=urllib.request.urlopen(req).read()
-          open('p2a.zip','wb').write(data)
-          with zipfile.ZipFile('p2a.zip') as z: z.extractall('p2a')
-          print(len(data))
-          PY
+          set -euo pipefail
+          gh api --method GET -H 'Accept: application/vnd.github+json' \
+            "/repos/${GITHUB_REPOSITORY}/actions/artifacts/${SOURCE_ARTIFACT_ID}/zip" > p2a.zip
+          test "$(stat -c%s p2a.zip)" = "$SOURCE_SIZE"
+          echo "$SOURCE_SHA256  p2a.zip" | sha256sum -c -
+          mkdir -p p2a
+          unzip -q p2a.zip -d p2a
+          test -d p2a/by_alias
       - name: Banquanshi targeted audit
         shell: python
         run: |
           import pathlib, csv, json, re, collections
-          import pyarrow.parquet as pq
+          import pyarrow.dataset as ds
           root=pathlib.Path('p2a'); out=pathlib.Path('out'); out.mkdir()
-          files=list(root.rglob('*.parquet'))
-          rows=[]
+          f=root/'by_alias'/'阪泉.parquet'
+          assert f.exists(), f
+          t=ds.dataset(f,format='parquet').to_table()
+          data=[r for r in t.to_pylist() if not bool(r.get('hard_false_positive',False))]
           pats={
             'BANQUAN_SHI':re.compile('阪泉氏'),
             'BANQUAN_TO_DULU':re.compile('阪泉氏.{0,120}(独鹿|獨鹿)|(独鹿|獨鹿).{0,120}阪泉氏'),
@@ -43,35 +49,27 @@ jobs:
             'BANQUAN_IDENTITY_YANDI':re.compile('(阪泉氏.{0,80}(即|就是|乃|为|為|指|系|係).{0,40}炎帝|炎帝.{0,80}(即|就是|乃|为|為|指|系|係).{0,40}阪泉氏)'),
             'BANQUAN_IDENTITY_CHIYOU':re.compile('(阪泉氏.{0,80}(即|就是|乃|为|為|指|系|係).{0,40}蚩尤|蚩尤.{0,80}(即|就是|乃|为|為|指|系|係).{0,40}阪泉氏)'),
           }
-          for f in files:
-            try:
-              t=pq.read_table(f)
-            except: continue
-            cols=t.column_names
-            ctx_col='context' if 'context' in cols else ('text' if 'text' in cols else None)
-            alias_col='alias' if 'alias' in cols else None
-            if not ctx_col: continue
-            d=t.to_pydict(); n=len(d[ctx_col])
-            for i in range(n):
-              ctx=d[ctx_col][i]
-              if not isinstance(ctx,str) or '阪泉' not in ctx: continue
-              alias=d[alias_col][i] if alias_col else ''
-              for name,p in pats.items():
-                if p.search(ctx):
-                  rows.append({'test':name,'alias':alias,'context':ctx,'file':str(f.relative_to(root))})
+          rows=[]
+          for r in data:
+            ctx=r.get('context') or ''
+            if '阪泉' not in ctx: continue
+            for name,p in pats.items():
+              if p.search(ctx):
+                rows.append({'test':name,'corpus_id':r.get('corpus_id'),'source_path':r.get('source_path'),'row_no':r.get('row_no'),'context':ctx})
           c=collections.Counter(r['test'] for r in rows)
-          with open(out/'summary.csv','w',encoding='utf-8-sig',newline='') as f:
-            w=csv.writer(f); w.writerow(['test','hits','dedup_contexts']);
-            for k in pats: w.writerow([k,c[k],len({r['context'] for r in rows if r['test']==k})])
-          # sample dedup contexts
+          with open(out/'summary.csv','w',encoding='utf-8-sig',newline='') as f2:
+            w=csv.writer(f2); w.writerow(['test','hits','dedup_contexts','distinct_rows'])
+            for k in pats:
+              rs=[r for r in rows if r['test']==k]
+              w.writerow([k,c[k],len({re.sub(r'\s+','',r['context']) for r in rs}),len({(r['corpus_id'],r['source_path'],r['row_no']) for r in rs})])
           seen=set(); samples=[]
           for r in rows:
             key=(r['test'],re.sub(r'\s+','',r['context']))
             if key in seen: continue
             seen.add(key); samples.append(r)
-          with open(out/'samples.jsonl','w',encoding='utf-8') as f:
-            for r in samples[:1000]: f.write(json.dumps(r,ensure_ascii=False)+'\n')
-          json.dump({'tests':list(pats),'total_hits':len(rows),'sample_count':min(1000,len(samples))},open(out/'manifest.json','w',encoding='utf-8'),ensure_ascii=False,indent=2)
+          with open(out/'samples.jsonl','w',encoding='utf-8') as f2:
+            for r in samples[:1000]: f2.write(json.dumps(r,ensure_ascii=False)+'\n')
+          json.dump({'source_artifact_id':9707827019,'view':'RESEARCH_OCCURRENCE','tests':list(pats),'total_hits':len(rows),'sample_count':min(1000,len(samples))},open(out/'manifest.json','w',encoding='utf-8'),ensure_ascii=False,indent=2)
           assert c['BANQUAN_SHI']>0
           print(c)
       - name: Gate
