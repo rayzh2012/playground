@@ -5,11 +5,20 @@ from __future__ import annotations
 import argparse
 import csv
 import json
-from collections import Counter
+from collections import Counter, defaultdict
 from pathlib import Path
 
 import pyarrow as pa
+import pyarrow.compute as pc
 import pyarrow.parquet as pq
+
+
+def safe_alias_filename(alias: str) -> str:
+    # Current ancient-name registry aliases are filesystem-safe Unicode. Keep
+    # them human-readable, but neutralize path/control characters defensively.
+    bad='\\/:*?"<>|\x00\n\r\t'
+    name=''.join('_' if ch in bad else ch for ch in alias).strip('. ')
+    return (name or 'EMPTY') + '.parquet'
 
 
 def main():
@@ -20,6 +29,7 @@ def main():
     args=ap.parse_args()
     root=Path(args.input_root)
     out=Path(args.out); out.mkdir(parents=True,exist_ok=True)
+    by_alias=out/'by_alias'; by_alias.mkdir(exist_ok=True)
 
     manifests=[]
     summaries=[]
@@ -57,6 +67,8 @@ def main():
             w.writerow([corpus,alias,count])
 
     writer=None
+    alias_writers={}
+    alias_meta=defaultdict(lambda:{'canonical':set(),'entity_type':set(),'rows':0})
     total_occ=0
     try:
         for p in occurrence_files:
@@ -67,22 +79,54 @@ def main():
                     writer=pq.ParquetWriter(out/'registry_occurrences.parquet',table.schema,compression='zstd')
                 writer.write_table(table)
                 total_occ += table.num_rows
+
+                aliases=set(x for x in table.column('alias').to_pylist() if x is not None)
+                for alias in aliases:
+                    sub=table.filter(pc.equal(table.column('alias'),pa.scalar(alias)))
+                    if sub.num_rows==0:
+                        continue
+                    if alias not in alias_writers:
+                        alias_writers[alias]=pq.ParquetWriter(by_alias/safe_alias_filename(alias),sub.schema,compression='zstd')
+                    alias_writers[alias].write_table(sub)
+                    meta=alias_meta[alias]
+                    meta['rows'] += sub.num_rows
+                    meta['canonical'].update(x for x in sub.column('canonical_entity').to_pylist() if x)
+                    meta['entity_type'].update(x for x in sub.column('entity_type').to_pylist() if x)
     finally:
         if writer is not None:
             writer.close()
+        for aw in alias_writers.values():
+            aw.close()
     if writer is None:
         raise RuntimeError('no occurrence files')
 
+    with (out/'by_alias_index.csv').open('w',encoding='utf-8-sig',newline='') as f:
+        w=csv.writer(f)
+        w.writerow(['alias','file','occurrence_rows','canonical_entities','entity_types'])
+        for alias in sorted(alias_meta):
+            meta=alias_meta[alias]
+            w.writerow([
+                alias,
+                f'by_alias/{safe_alias_filename(alias)}',
+                meta['rows'],
+                '|'.join(sorted(meta['canonical'])),
+                '|'.join(sorted(meta['entity_type'])),
+            ])
+
+    if sum(m['rows'] for m in alias_meta.values()) != total_occ:
+        raise RuntimeError('per-alias partition row total does not equal merged occurrence total')
+
     manifest={
-        'schema_version':'GCI-REGISTRY-MERGE-1.0',
+        'schema_version':'GCI-REGISTRY-MERGE-1.1',
         'batch_count':len(manifests),
         'shard_count':len(summaries),
         'expected_shards':args.expected_shards,
         'occurrence_count':total_occ,
+        'alias_file_count':len(alias_meta),
         'corpora':sorted(set(r['corpus_id'] for r in summaries)),
         'raw_mutated':False,
         'locator_contract':'corpus_id + shard_ordinal + source_path + row_no + match_start/match_end',
-        'outputs':['registry_occurrences.parquet','shard_summary.csv','term_totals.csv'],
+        'outputs':['registry_occurrences.parquet','by_alias/','by_alias_index.csv','shard_summary.csv','term_totals.csv'],
     }
     (out/'manifest.json').write_text(json.dumps(manifest,ensure_ascii=False,indent=2),encoding='utf-8')
     print(json.dumps(manifest,ensure_ascii=False),flush=True)
