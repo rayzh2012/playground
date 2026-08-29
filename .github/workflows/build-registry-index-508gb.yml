@@ -1,0 +1,189 @@
+name: Build 508GB Registry Occurrence Index
+
+on:
+  push:
+    branches:
+      - master
+    paths:
+      - .github/workflows/build-registry-index-508gb.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      lit: ${{ steps.plan.outputs.lit }}
+      cwt: ${{ steps.plan.outputs.cwt }}
+    steps:
+      - id: plan
+        shell: bash
+        run: |
+          python - <<'PY' >> "$GITHUB_OUTPUT"
+          import json
+          def batches(start,end,size):
+              out=[]
+              s=start
+              while s<=end:
+                  e=min(end,s+size-1)
+                  out.append({'start':s,'end':e})
+                  s=e+1
+              return out
+          print('lit='+json.dumps(batches(1,233,5),separators=(',',':')))
+          print('cwt='+json.dumps(batches(0,1554,20),separators=(',',':')))
+          PY
+
+  scan-literature:
+    needs: plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      max-parallel: 8
+      matrix:
+        batch: ${{ fromJSON(needs.plan.outputs.lit) }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: global-corpus-index-v1
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install dependencies
+        run: python -m pip install --disable-pip-version-check 'huggingface_hub[hf_xet]' 'pyarrow>=23,<24' pyahocorasick
+      - name: Scan Literature batch
+        run: |
+          OUT="batch_output/literature_${{ matrix.batch.start }}_${{ matrix.batch.end }}"
+          python tools/scan_registry_parquet_batch.py \
+            --corpus literature \
+            --start '${{ matrix.batch.start }}' \
+            --end '${{ matrix.batch.end }}' \
+            --registry corpus_index/entity_registry.tsv \
+            --out "$OUT"
+      - name: Batch acceptance
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          root=Path("batch_output/literature_${{ matrix.batch.start }}_${{ matrix.batch.end }}")
+          m=json.loads((root/'manifest.json').read_text(encoding='utf-8'))
+          assert m['shard_count']==${{ matrix.batch.end - matrix.batch.start + 1 }},m
+          assert m['registry_alias_count']==34,m
+          assert m['raw_mutated'] is False,m
+          assert (root/'occurrences.parquet').exists(),m
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: registry-lit-${{ matrix.batch.start }}-${{ matrix.batch.end }}
+          path: batch_output/literature_${{ matrix.batch.start }}_${{ matrix.batch.end }}/
+          retention-days: 30
+          compression-level: 0
+
+  scan-cwt:
+    needs: plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      max-parallel: 8
+      matrix:
+        batch: ${{ fromJSON(needs.plan.outputs.cwt) }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: global-corpus-index-v1
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install dependencies
+        run: python -m pip install --disable-pip-version-check 'huggingface_hub[hf_xet]' 'pyarrow>=23,<24' pyahocorasick
+      - name: Scan ChineseWebText batch
+        run: |
+          OUT="batch_output/cwt_${{ matrix.batch.start }}_${{ matrix.batch.end }}"
+          python tools/scan_registry_parquet_batch.py \
+            --corpus cwt \
+            --start '${{ matrix.batch.start }}' \
+            --end '${{ matrix.batch.end }}' \
+            --registry corpus_index/entity_registry.tsv \
+            --out "$OUT"
+      - name: Batch acceptance
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          root=Path("batch_output/cwt_${{ matrix.batch.start }}_${{ matrix.batch.end }}")
+          m=json.loads((root/'manifest.json').read_text(encoding='utf-8'))
+          assert m['shard_count']==${{ matrix.batch.end - matrix.batch.start + 1 }},m
+          assert m['registry_alias_count']==34,m
+          assert m['raw_mutated'] is False,m
+          assert (root/'occurrences.parquet').exists(),m
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: registry-cwt-${{ matrix.batch.start }}-${{ matrix.batch.end }}
+          path: batch_output/cwt_${{ matrix.batch.start }}_${{ matrix.batch.end }}/
+          retention-days: 30
+          compression-level: 0
+
+  merge:
+    needs: [scan-literature, scan-cwt]
+    if: ${{ always() && needs.scan-literature.result == 'success' && needs.scan-cwt.result == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: global-corpus-index-v1
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install merge dependency
+        run: python -m pip install --disable-pip-version-check 'pyarrow>=23,<24'
+      - name: Download all batch results
+        uses: actions/download-artifact@v4
+        with:
+          pattern: registry-*
+          path: batch_results
+      - name: Merge and validate
+        run: |
+          echo "Batch manifests: $(find batch_results -name manifest.json | wc -l)"
+          python tools/merge_registry_scan.py \
+            --input-root batch_results \
+            --out merged_index \
+            --expected-shards 1788
+          python - <<'PY'
+          import csv,json
+          from pathlib import Path
+          m=json.loads(Path('merged_index/manifest.json').read_text(encoding='utf-8'))
+          assert m['shard_count']==1788,m
+          assert m['occurrence_count']>0,m
+          rows=list(csv.DictReader(Path('merged_index/shard_summary.csv').open(encoding='utf-8-sig')))
+          lit=[int(r['shard_ordinal']) for r in rows if r['corpus_id']=='GCI-HOLD-0001']
+          cwt=[int(r['shard_ordinal']) for r in rows if r['corpus_id']=='GCI-HOLD-0002']
+          assert lit==list(range(1,234)),(lit[:3],lit[-3:],len(lit))
+          assert cwt==list(range(0,1555)),(cwt[:3],cwt[-3:],len(cwt))
+          print(m)
+          PY
+      - name: Upload merged occurrence index
+        uses: actions/upload-artifact@v4
+        with:
+          name: global-corpus-registry-occurrence-index
+          path: merged_index/
+          retention-days: 90
+          compression-level: 0
+      - name: Persist durable small manifests
+        run: |
+          mkdir -p artifacts/global_corpus_index/registry_508gb
+          cp merged_index/manifest.json artifacts/global_corpus_index/registry_508gb/
+          cp merged_index/shard_summary.csv artifacts/global_corpus_index/registry_508gb/
+          cp merged_index/term_totals.csv artifacts/global_corpus_index/registry_508gb/
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add artifacts/global_corpus_index/registry_508gb
+          git commit -m 'chore: persist 508GB registry index manifests [skip ci]' || true
+          git fetch origin global-corpus-index-v1
+          git rebase origin/global-corpus-index-v1
+          git push origin HEAD:global-corpus-index-v1
