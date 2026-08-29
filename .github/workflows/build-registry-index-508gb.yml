@@ -28,7 +28,7 @@ jobs:
               s=start
               while s<=end:
                   e=min(end,s+size-1)
-                  out.append({'start':s,'end':e})
+                  out.append({'start':s,'end':e,'count':e-s+1})
                   s=e+1
               return out
           print('lit='+json.dumps(batches(1,233,5),separators=(',',':')))
@@ -63,13 +63,15 @@ jobs:
             --registry corpus_index/entity_registry.tsv \
             --out "$OUT"
       - name: Batch acceptance
+        env:
+          EXPECTED_SHARDS: ${{ matrix.batch.count }}
         run: |
           python - <<'PY'
-          import json
+          import json, os
           from pathlib import Path
           root=Path("batch_output/literature_${{ matrix.batch.start }}_${{ matrix.batch.end }}")
           m=json.loads((root/'manifest.json').read_text(encoding='utf-8'))
-          assert m['shard_count']==${{ matrix.batch.end - matrix.batch.start + 1 }},m
+          assert m['shard_count']==int(os.environ['EXPECTED_SHARDS']),m
           assert m['registry_alias_count']==34,m
           assert m['raw_mutated'] is False,m
           assert (root/'occurrences.parquet').exists(),m
@@ -109,13 +111,15 @@ jobs:
             --registry corpus_index/entity_registry.tsv \
             --out "$OUT"
       - name: Batch acceptance
+        env:
+          EXPECTED_SHARDS: ${{ matrix.batch.count }}
         run: |
           python - <<'PY'
-          import json
+          import json, os
           from pathlib import Path
           root=Path("batch_output/cwt_${{ matrix.batch.start }}_${{ matrix.batch.end }}")
           m=json.loads((root/'manifest.json').read_text(encoding='utf-8'))
-          assert m['shard_count']==${{ matrix.batch.end - matrix.batch.start + 1 }},m
+          assert m['shard_count']==int(os.environ['EXPECTED_SHARDS']),m
           assert m['registry_alias_count']==34,m
           assert m['raw_mutated'] is False,m
           assert (root/'occurrences.parquet').exists(),m
