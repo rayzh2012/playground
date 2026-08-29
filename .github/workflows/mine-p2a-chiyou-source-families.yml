@@ -1,0 +1,131 @@
+name: Mine P2A Chiyou Source Families
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - .github/workflows/mine-p2a-chiyou-source-families.yml
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  collapse:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      GH_TOKEN: ${{ github.token }}
+      SOURCE_ARTIFACT_ID: '9707827019'
+      SOURCE_SIZE: '4381625928'
+      SOURCE_SHA256: '84581c47f1b3fcb29f3a311b28b29cfdb36d2b84ba538507e54daf4445fa6a4b'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: python -m pip install --disable-pip-version-check 'pyarrow>=23,<24'
+      - name: Download canonical P2A
+        run: |
+          set -euo pipefail
+          gh api --method GET -H 'Accept: application/vnd.github+json' \
+            "/repos/${GITHUB_REPOSITORY}/actions/artifacts/${SOURCE_ARTIFACT_ID}/zip" > p2a-final.zip
+          test "$(stat -c%s p2a-final.zip)" = "$SOURCE_SIZE"
+          echo "$SOURCE_SHA256  p2a-final.zip" | sha256sum -c -
+          mkdir index && unzip -q p2a-final.zip -d index
+      - name: Source-family collapse
+        run: |
+          mkdir out
+          python - <<'PY'
+          import csv,json,re,hashlib
+          from pathlib import Path
+          from collections import Counter,defaultdict
+          import pyarrow.dataset as ds
+          ROOT=Path('index'); OUT=Path('out')
+          def safe(a):
+              bad='\\/:*?"<>|\x00\n\r\t'; n=''.join('_' if c in bad else c for c in a).strip('. ')
+              return (n or 'EMPTY')+'.parquet'
+          def load(a):
+              t=ds.dataset(ROOT/'by_alias'/safe(a),format='parquet').to_table()
+              return [r for r in t.to_pylist() if not bool(r.get('hard_false_positive',False))]
+          aliases=['蚩尤','炎帝','赤帝','九黎','涿鹿','阪泉','黄帝','神农','榆罔']
+          D={a:load(a) for a in aliases}
+          key=lambda r:(r.get('corpus_id'),r.get('source_path'),r.get('row_no'))
+          rows={a:{key(r):r for r in D[a]} for a in aliases}
+          ckeys=set(rows['蚩尤'])
+          groups={
+            'CHIDI_YANDI_GLOSS': ckeys & set(rows['赤帝']) & set(rows['炎帝']),
+            'CHIYOU_YANDI': ckeys & set(rows['炎帝']),
+            'CHIYOU_CHIDI': ckeys & set(rows['赤帝']),
+            'CHIYOU_JIULI': ckeys & set(rows['九黎']),
+            'CHIYOU_ZHUOLU': ckeys & set(rows['涿鹿']),
+            'CHIYOU_BANQUAN': ckeys & set(rows['阪泉']),
+            'CHIYOU_ZHUOLU_BANQUAN': ckeys & set(rows['涿鹿']) & set(rows['阪泉']),
+            'CHIYOU_SHENNONG': ckeys & set(rows['神农']),
+            'CHIYOU_YUWANG': ckeys & set(rows['榆罔']),
+          }
+          fam_patterns=[
+            ('YIZHOUSHU_CHANGMAI',r'逸周书|嘗麥|尝麦'),
+            ('SHANGSHU_LVXING',r'尚书|尚書|吕刑|呂刑'),
+            ('SHIJI_WUDI',r'史记|史記|五帝本纪|五帝本紀'),
+            ('GUOYU_CHUYU',r'国语|國語|楚语|楚語|韦昭|韋昭'),
+            ('GUANZI',r'管子'),
+            ('HANFEIZI',r'韩非子|韓非子'),
+            ('QINGHUA_WUJI',r'五纪|五紀|清华简|清華簡'),
+            ('YANTIELUN_JIEHE',r'盐铁论|鹽鐵論|结和|結和'),
+            ('LUSHI',r'路史'),
+            ('LONGYU_HETU',r'龙鱼河图|龍魚河圖'),
+            ('SHIBEN_SONGZHONG',r'世本|宋衷'),
+            ('COMMENTARY_JIA_DU_ZHANG',r'贾逵|賈逵|杜预|杜預|张守节|張守節|正义|正義|集解|索隐|索隱'),
+          ]
+          modern_markers=re.compile(r'研究|学者|學者|认为|認為|一说|一說|有观点|有觀點|本文|论文|論文|现代|現代|百科|知乎|作者|学界|學界|可能|或认为|或認為')
+          punct=re.compile(r'[\s\u3000，。！？；：、“”‘’（）()《》〈〉\[\]【】—…·,.!?;:\-]')
+          def classify(ctx):
+              hits=[name for name,pat in fam_patterns if re.search(pat,ctx)]
+              if hits: return '+'.join(hits[:3])
+              if modern_markers.search(ctx): return 'MODERN_SYNTHESIS_UNATTRIBUTED'
+              return 'UNATTRIBUTED_OTHER'
+          def norm(ctx):
+              s=punct.sub('',ctx)
+              s=re.sub(r'\d+','',s)
+              return s[:500]
+          summary=[]; samples=[]
+          for g,ks in groups.items():
+              fam=Counter(); corp=Counter(); uniq_norm=set(); uniq_source=set(); relation_cues=Counter()
+              for k in ks:
+                  r=rows['蚩尤'][k]; ctx=r.get('context') or ''
+                  f=classify(ctx); fam[f]+=1; corp[r.get('corpus_id')]+=1
+                  uniq_norm.add(hashlib.sha1(norm(ctx).encode()).hexdigest())
+                  uniq_source.add((r.get('corpus_id'),r.get('source_path')))
+                  if re.search(r'九黎.{0,20}(之君|君|之徒|蚩尤)|蚩尤.{0,20}(九黎|之君|之徒)',ctx): relation_cues['JIULI_IDENTITY_OR_AFFILIATION']+=1
+                  if re.search(r'(赤帝.{0,30}(即|就是|亦即|指).{0,20}炎帝|炎帝.{0,30}(即|就是|亦即|指).{0,20}赤帝)',ctx): relation_cues['CHIDI_EQUALS_YANDI_GLOSS']+=1
+                  if re.search(r'蚩尤.{0,30}(号|號|自号|自號|称|稱).{0,12}炎帝|炎帝之后|炎帝之後|炎帝后裔|炎帝後裔',ctx): relation_cues['CHIYOU_YANDI_IDENTITY_DESCENT']+=1
+                  if re.search(r'阪泉.{0,80}涿鹿|涿鹿.{0,80}阪泉',ctx): relation_cues['BANQUAN_ZHUOLU_SAME_PASSAGE']+=1
+                  if sum(1 for x in samples if x['group']==g)<30:
+                      samples.append({'group':g,'family':f,'corpus_id':r.get('corpus_id'),'source_path':r.get('source_path'),'row_no':r.get('row_no'),'context':ctx})
+              summary.append({'group':g,'shared_rows':len(ks),'distinct_source_paths':len(uniq_source),'dedup_context_fingerprints':len(uniq_norm),'literature_rows':corp.get('GCI-HOLD-0001',0),'cwt_rows':corp.get('GCI-HOLD-0002',0),'top_families':json.dumps(fam.most_common(10),ensure_ascii=False),'relation_cues':json.dumps(relation_cues,ensure_ascii=False)})
+          with (OUT/'family_summary.csv').open('w',encoding='utf-8-sig',newline='') as f:
+              w=csv.DictWriter(f,fieldnames=list(summary[0]));w.writeheader();w.writerows(summary)
+          with (OUT/'samples.jsonl').open('w',encoding='utf-8') as f:
+              for x in samples:f.write(json.dumps(x,ensure_ascii=False)+'\n')
+          (OUT/'manifest.json').write_text(json.dumps({'schema':'P2A-CHIYOU-SOURCE-FAMILY-1.0','method':'exact locator-row intersection + heuristic source-family attribution + normalized context fingerprint collapse','warning':'Family attribution is heuristic retrieval diagnostics; inspect samples before historical inference.'},ensure_ascii=False,indent=2),encoding='utf-8')
+          print(json.dumps(summary,ensure_ascii=False,indent=2))
+          PY
+      - name: Gate
+        run: |
+          python - <<'PY'
+          import csv,json
+          from pathlib import Path
+          r=list(csv.DictReader(Path('out/family_summary.csv').open(encoding='utf-8-sig')))
+          assert len(r)==9
+          names={x['group'] for x in r}
+          assert {'CHIDI_YANDI_GLOSS','CHIYOU_JIULI','CHIYOU_ZHUOLU_BANQUAN'} <= names
+          assert all(int(x['shared_rows'])>=0 for x in r)
+          print({'groups':len(r),'gate':'PASS'})
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: p2a-chiyou-source-family-collapse
+          path: out/
+          retention-days: 90
