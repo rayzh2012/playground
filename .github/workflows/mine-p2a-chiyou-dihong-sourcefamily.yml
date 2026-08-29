@@ -1,0 +1,134 @@
+name: Mine P2A Chiyou Dihong Source Families
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - .github/workflows/mine-p2a-chiyou-dihong-sourcefamily.yml
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      GH_TOKEN: ${{ github.token }}
+      SLICE_ARTIFACT_ID: '9708828790'
+      SLICE_RUN_ID: '33232148182'
+      SLICE_DIGEST: '3e930f9806f65274d7441ac3966d0d37c8997d4d0d0145eafc2fdcc7e3c9baaf'
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: python -m pip install --disable-pip-version-check 'pyarrow>=23,<24'
+      - name: Download compact research slice
+        run: |
+          set -euo pipefail
+          gh api --method GET -H 'Accept: application/vnd.github+json' \
+            "/repos/${GITHUB_REPOSITORY}/actions/artifacts/${SLICE_ARTIFACT_ID}/zip" > slice.zip
+          mkdir -p slice
+          unzip -q slice.zip -d slice
+          test -f slice/by_alias/蚩尤.parquet
+          test -f slice/slice_manifest.json
+          python - <<'PY'
+          import json,os
+          from pathlib import Path
+          m=json.loads(Path('slice/slice_manifest.json').read_text(encoding='utf-8'))
+          assert m['source_artifact_id']==9707827019
+          assert '蚩尤' in m['aliases'] and '帝鸿' in m['aliases']
+          print({'slice_source':m['source_artifact_id'],'aliases':m['aliases'],'size':m['total_size_bytes']})
+          PY
+      - name: Audit Chiyou-Dihong source families
+        run: |
+          mkdir -p out
+          python - <<'PY'
+          import csv,json,re,unicodedata
+          from pathlib import Path
+          from collections import Counter,defaultdict
+          import pyarrow.parquet as pq
+
+          df=pq.read_table('slice/by_alias/蚩尤.parquet').to_pandas()
+          df=df[~df['hard_false_positive'].astype(bool)].copy()
+          df['context']=df['context'].fillna('').astype(str)
+          pair=df[df['context'].str.contains('帝鸿',regex=False)].copy()
+          CORP={'GCI-HOLD-0001':'Literature-zh','GCI-HOLD-0002':'ChineseWebText2.0-HQ'}
+          FAMILIES={
+            'HUANGDI_EQ_DI_HONG':[r'帝鸿.{0,24}(?:即|乃|为|是).{0,10}黄帝',r'黄帝.{0,24}(?:即|乃|为|是).{0,10}帝鸿',r'帝鸿.{0,16}黄帝(?:也|氏)?',r'帝鸿氏.{0,18}(?:黄帝|轩辕)'],
+            'DIJUN_BAIMIN_LINE':[r'帝俊.{0,24}帝鸿.{0,24}白民',r'帝俊生帝鸿',r'帝鸿生白民'],
+            'FOUR_EVILS_HUNDUN':[r'帝鸿氏.{0,30}(?:不才子|混敦|浑敦|四凶)',r'(?:混敦|浑敦|四凶).{0,30}帝鸿氏'],
+            'HUANGDI_ALIAS_PACKAGE':[r'(?:有熊氏|缙云氏|帝轩氏|归藏氏).{0,40}帝鸿氏',r'帝鸿氏.{0,40}(?:有熊氏|缙云氏|帝轩氏|归藏氏)'],
+            'PARENT_SUCCESSOR_CONFLICT':[r'帝鸿.{0,35}(?:父|父曰|生轩辕|后继|继|世及|黄鸿|鸿黄)',r'(?:黄帝|轩辕).{0,35}(?:生|后|继).{0,15}帝鸿'],
+            'CHIYOU_DI_HONG_DIRECT':[r'蚩尤.{0,50}帝鸿',r'帝鸿.{0,50}蚩尤'],
+            'MULTI_CHIYOU_SCHOLARLY':[r'(?:二蚩尤|两蚩尤|至少有二蚩尤|多个蚩尤|不止一个蚩尤)',r'帝鸿氏.{0,80}蚩尤.{0,80}(?:称谓|首领|氏族|集团)'],
+          }
+          regs={k:[re.compile(x) for x in v] for k,v in FAMILIES.items()}
+          def fams(ctx): return [k for k,rs in regs.items() if any(rx.search(ctx) for rx in rs)]
+          def norm(s):
+              s=unicodedata.normalize('NFKC',s)
+              s=re.sub(r'\s+','',s)
+              s=re.sub(r'[，。；：、“”‘’（）()《》〈〉【】\[\]！？,.!?;:\-—…]','',s)
+              return s
+          pair['families']=pair['context'].map(fams)
+          pair['norm_context']=pair['context'].map(norm)
+
+          summary=[]
+          for cid,g in pair.groupby('corpus_id'):
+              summary.append({'corpus':CORP.get(cid,cid),'pair_hits':len(g),'distinct_rows':len(g[['source_path','row_no']].drop_duplicates()),'unique_contexts':g['context'].nunique(),'normalized_unique_contexts':g['norm_context'].nunique(),'unclassified_hits':sum(not x for x in g['families'])})
+          family_rows=[]
+          for cid,g in pair.groupby('corpus_id'):
+              for f in FAMILIES:
+                  x=g[g['families'].map(lambda z:f in z)]
+                  family_rows.append({'corpus':CORP.get(cid,cid),'family':f,'hits':len(x),'distinct_rows':len(x[['source_path','row_no']].drop_duplicates()),'unique_contexts':x['context'].nunique(),'normalized_unique_contexts':x['norm_context'].nunique(),'share_of_pair_hits':round(len(x)/max(1,len(g)),8)})
+          # pairwise other entities
+          ents=['黄帝','黄帝氏','炎帝','赤帝','神农','九黎','涿鹿','阪泉','帝俊','白民','帝江','混敦','浑敦','缙云氏','少昊','颛顼','有熊氏']
+          companions=[]
+          for cid,g in pair.groupby('corpus_id'):
+              for e in ents:
+                  n=g['context'].str.contains(e,regex=False).sum()
+                  companions.append({'corpus':CORP.get(cid,cid),'entity':e,'hits':int(n),'share':round(int(n)/max(1,len(g)),8)})
+          # exact/normalized cluster concentration
+          clusters=[]
+          for cid,g in pair.groupby('corpus_id'):
+              c=Counter(g['norm_context'])
+              for ctx,n in c.most_common(100):
+                  ex=g[g['norm_context']==ctx].iloc[0]
+                  clusters.append({'corpus':CORP.get(cid,cid),'normalized_cluster_hits':n,'source_path':ex['source_path'],'row_no':ex['row_no'],'families':'|'.join(ex['families']),'context':ex['context']})
+          # deterministic one representative per distinct source row, max 150/corpus
+          samples=[]
+          for cid,g in pair.sort_values(['source_path','row_no','match_start']).groupby('corpus_id'):
+              seen=set()
+              for _,r in g.iterrows():
+                  key=(r['source_path'],r['row_no'])
+                  if key in seen: continue
+                  seen.add(key)
+                  samples.append({'corpus':CORP.get(cid,cid),'source_path':r['source_path'],'row_no':r['row_no'],'shard_ordinal':r['shard_ordinal'],'match_start':r['match_start'],'families':'|'.join(r['families']),'context':r['context']})
+                  if len(seen)>=150: break
+          def write(name,rows):
+              with open('out/'+name,'w',encoding='utf-8-sig',newline='') as f:
+                  w=csv.DictWriter(f,fieldnames=list(rows[0].keys()));w.writeheader();w.writerows(rows)
+          write('corpus_summary.csv',summary);write('family_summary.csv',family_rows);write('companions.csv',companions);write('top_normalized_clusters.csv',clusters);write('samples.csv',samples)
+          manifest={'schema_version':'P2A-CHIYOU-DIHONG-SOURCEFAMILY-1.0','slice_artifact_id':9708828790,'view':'RESEARCH_OCCURRENCE','pair_definition':'Chiyou occurrence context contains 帝鸿','pair_hits_total':len(pair),'family_rules_nonexclusive':True,'warning':'Context-family regexes are retrieval diagnostics; source-family independence requires textual/provenance review.'}
+          Path('out/manifest.json').write_text(json.dumps(manifest,ensure_ascii=False,indent=2),encoding='utf-8')
+          print(json.dumps({'manifest':manifest,'corpus_summary':summary,'family_summary':family_rows,'companions':companions},ensure_ascii=False,indent=2))
+          PY
+      - name: Gate
+        run: |
+          python - <<'PY'
+          import json,csv
+          from pathlib import Path
+          m=json.loads(Path('out/manifest.json').read_text(encoding='utf-8'))
+          s=list(csv.DictReader(Path('out/corpus_summary.csv').open(encoding='utf-8-sig')))
+          assert m['view']=='RESEARCH_OCCURRENCE'
+          assert len(s)==2
+          assert m['pair_hits_total']>0
+          print({'gate':'PASS','pair_hits_total':m['pair_hits_total']})
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: p2a-chiyou-dihong-sourcefamily
+          path: out/
+          retention-days: 90
