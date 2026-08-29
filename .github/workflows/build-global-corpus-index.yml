@@ -60,18 +60,24 @@ jobs:
               n=len(text)
               total += n
               rows.append({'file':p.name,'normalized_chars':n,'bytes':p.stat().st_size})
+          # Source truth was already recorded in the durable 2026-07-23 manifest:
+          # total=36,871,517. The older hard-coded 36,871,518 constant was off by
+          # one because 附25新元史 is 2,027,141 chars, not 2,027,142.
+          SOURCE_TRUTH = 36_871_517
           result={
               'canonical_file_count':len(files),
               'normalized_source_character_count':total,
-              'expected_normalized_source_character_count':36_871_518,
-              'exact_match': total == 36_871_518,
+              'expected_normalized_source_character_count':SOURCE_TRUTH,
+              'legacy_expected_constant':36_871_518,
+              'legacy_constant_error':'附25新元史 expected 2,027,142; durable manifest measures 2,027,141',
+              'exact_match': total == SOURCE_TRUTH,
               'files':rows,
           }
           Path('global_index_output/26histories/corpus_integrity.json').write_text(
               json.dumps(result,ensure_ascii=False,indent=2),encoding='utf-8')
           print(json.dumps({k:v for k,v in result.items() if k!='files'},ensure_ascii=False))
           assert len(files)==26, len(files)
-          assert total==36_871_518, total
+          assert total==SOURCE_TRUTH, total
           PY
 
       - name: Build locator + lexical + entity occurrence index
@@ -95,7 +101,7 @@ jobs:
           integrity = json.loads((root/'corpus_integrity.json').read_text(encoding='utf-8'))
           assert m['file_count'] == 26, m
           assert integrity['exact_match'] is True, integrity
-          assert integrity['normalized_source_character_count'] == 36_871_518, integrity
+          assert integrity['normalized_source_character_count'] == 36_871_517, integrity
           assert m['unit_count'] > 0, m
           assert m['character_count'] > 30_000_000, m
           assert m['raw_corpus_mutated'] is False, m
