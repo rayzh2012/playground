@@ -1,0 +1,60 @@
+name: Test Registry Merge Quality Gate
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - .github/workflows/test-registry-merge-quality.yml
+  workflow_dispatch:
+
+jobs:
+  quality-gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: global-corpus-index-v1
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: python -m pip install --disable-pip-version-check 'pyarrow>=23,<24'
+      - name: Build synthetic batch
+        run: |
+          mkdir -p synthetic/batch1
+          python - <<'PY'
+          import csv,json
+          from pathlib import Path
+          import pyarrow as pa, pyarrow.parquet as pq
+          root=Path('synthetic/batch1')
+          rows=[
+            {'corpus_id':'GCI-HOLD-TEST','shard_ordinal':1,'source_path':'test.parquet','row_no':1,'match_start':1,'match_end':3,'canonical_entity':'共工','alias':'共工','entity_type':'HOLDER/HOUSE/TITLE','context':'政府增加公共工程投资以促进就业'},
+            {'corpus_id':'GCI-HOLD-TEST','shard_ordinal':1,'source_path':'test.parquet','row_no':2,'match_start':0,'match_end':2,'canonical_entity':'共工','alias':'共工','entity_type':'HOLDER/HOUSE/TITLE','context':'共工怒触不周山，天柱折'},
+          ]
+          pq.write_table(pa.Table.from_pylist(rows),root/'occurrences.parquet',compression='zstd')
+          (root/'manifest.json').write_text(json.dumps({'shard_count':1}),encoding='utf-8')
+          with (root/'shard_summary.csv').open('w',encoding='utf-8-sig',newline='') as f:
+            w=csv.writer(f); w.writerow(['corpus_id','shard_ordinal','source_path','bytes','sha256','rows','row_groups','occurrences','alias_counts_json']); w.writerow(['GCI-HOLD-TEST',1,'test.parquet',1,'x',2,1,2,'{"共工":2}'])
+          with (root/'term_totals.csv').open('w',encoding='utf-8-sig',newline='') as f:
+            w=csv.writer(f); w.writerow(['corpus_id','canonical_or_alias','count']); w.writerow(['GCI-HOLD-TEST','共工',2])
+          PY
+      - name: Merge quality view
+        run: python tools/merge_registry_scan.py --input-root synthetic --out merged --expected-shards 1
+      - name: Acceptance
+        run: |
+          python - <<'PY'
+          import json,csv
+          from pathlib import Path
+          import pyarrow.parquet as pq
+          m=json.loads(Path('merged/manifest.json').read_text(encoding='utf-8'))
+          assert m['occurrence_count']==2,m
+          assert m['raw_occurrence_count']==2,m
+          assert m['research_occurrence_count']==1,m
+          assert m['hard_false_positive_count']==1,m
+          t=pq.read_table('merged/by_alias/共工.parquet')
+          assert t.num_rows==2
+          vals=t.to_pylist()
+          assert sum(bool(r['hard_false_positive']) for r in vals)==1,vals
+          q=pq.read_table('merged/research_occurrences.parquet').to_pylist()
+          assert len(q)==1 and '不周山' in q[0]['context'],q
+          print(m)
+          PY
