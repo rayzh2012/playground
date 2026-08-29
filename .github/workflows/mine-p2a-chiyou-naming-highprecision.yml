@@ -1,0 +1,128 @@
+name: Mine P2A Chiyou Naming High Precision
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - .github/workflows/mine-p2a-chiyou-naming-highprecision.yml
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      GH_TOKEN: ${{ github.token }}
+      SOURCE_ARTIFACT_ID: '9707827019'
+      SOURCE_RUN_ID: '33228804380'
+      SOURCE_SIZE: '4381625928'
+      SOURCE_SHA256: '84581c47f1b3fcb29f3a311b28b29cfdb36d2b84ba538507e54daf4445fa6a4b'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: global-corpus-index-v1
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: python -m pip install --disable-pip-version-check 'pyarrow>=23,<24'
+      - name: Download and verify canonical P2A artifact
+        run: |
+          set -euo pipefail
+          gh api --method GET -H 'Accept: application/vnd.github+json' \
+            "/repos/${GITHUB_REPOSITORY}/actions/artifacts/${SOURCE_ARTIFACT_ID}/zip" > p2a-final.zip
+          test "$(stat -c%s p2a-final.zip)" = "$SOURCE_SIZE"
+          echo "$SOURCE_SHA256  p2a-final.zip" | sha256sum -c -
+          mkdir -p index
+          unzip -q p2a-final.zip -d index
+          test -f index/by_alias/蚩尤.parquet
+      - name: Run high precision naming audit
+        run: |
+          mkdir -p naming_out
+          python - <<'PY'
+          import csv,json,re,os
+          from pathlib import Path
+          from collections import Counter
+          import pyarrow.dataset as ds
+
+          OUT=Path('naming_out')
+          rows=ds.dataset(Path('index/by_alias/蚩尤.parquet'),format='parquet').to_table().to_pylist()
+          rows=[r for r in rows if not bool(r.get('hard_false_positive',False)) and r.get('corpus_id')=='GCI-HOLD-0001']
+
+          POS={
+            'DEFEAT_REBEL_LABEL':[r'(?:失败者|战败者|败者|叛者|逆者|反者).{0,24}(?:称|谓|号|名)(?:为|作|曰)?[“\"「『]?蚩尤',r'(?:因|以|由于).{0,28}(?:反|叛|逆|逐帝|失败|战败|作乱).{0,28}(?:被|遂|故|因而)?(?:称|谓|号|名)(?:为|作|曰)?[“\"「『]?蚩尤'],
+            'RENAMING_EXPLICIT':[r'(?:本名|原名|原称|旧名|本称).{0,36}(?:后|遂|故|因|而)?.{0,8}(?:被|改|遂|乃)?(?:称|谓|号|名)(?:为|作|曰)?[“\"「『]?蚩尤',r'(?:被|遂|乃|故|因而)(?:称|谓|号|名)(?:为|作|曰)?[“\"「『]?蚩尤'],
+            'MULTI_HOLDER_EXPLICIT':[r'(?:至少有?|至少存在|有)(?:两个|二个|二|两位|多个|数个)蚩尤',r'(?:两个|二个|两位|多个|数个|不止一个|并非一个)蚩尤',r'蚩尤.{0,45}(?:至少有?|不止|多个|两个|二个).{0,12}(?:人物|首领|持有者|holder|个体)?'],
+            'GROUP_HOLDER_TERM':[r'蚩尤.{0,45}(?:氏族部落集团|部落集团|氏族集团).{0,45}(?:首领|称谓|称号|君号)',r'蚩尤.{0,35}(?:氏族|部落|集团).{0,35}(?:及其首领|首领之称谓|共同称谓|君号)',r'蚩尤.{0,30}(?:九黎之君号|九黎.*君号|君号)'],
+            'NAME_TITLE_DISCUSSION':[r'蚩尤.{0,24}(?:之名|之号|名号|称号|君号|氏号|称谓|本名|原名|蔑称|贬称)',r'(?:名号|称号|君号|氏号|称谓|本名|原名|蔑称|贬称).{0,24}蚩尤'],
+            'FAILED_VS_SUCCESS_TITLE':[r'显赫者.{0,12}称炎帝.{0,28}失败者.{0,12}称蚩尤',r'胜利者.{0,35}(?:称|号).{0,12}炎帝.{0,50}失败者.{0,20}(?:称|谓|号).{0,8}蚩尤',r'失败者.{0,20}(?:称|谓|号).{0,8}蚩尤.{0,50}胜利者'],
+          }
+          NEG={
+            'OBJECT_PLACE_CULT':[r'蚩尤(?:血|旗|帽|戏|祠|冢|墓|城|村|故里|故乡|陵|山|泉|像|庙|司法鉴定所|酒店|广场|景区|文化园|纪念馆)'],
+            'META_REHABILITATION':[r'(?:给|为).{0,6}蚩尤正名',r'蚩尤.{0,8}(?:正名|平反)'],
+            'NEARBY_MINGYUE_OTHER':[r'名曰.{0,18}(?:女魃|黄帝女魃|旱魃).{0,28}蚩尤'],
+          }
+          SRC={'YIZHOUSHU_CHANGMAI':[r'逸周书.{0,8}尝麦',r'尝麦篇?',r'《尝麦》'], 'SHIJI_WUDI':[r'史记.{0,8}五帝本纪',r'《五帝本纪》'], 'SHANHAIJING':[r'山海经'], 'SHIBEN':[r'世本'], 'LUSHI':[r'路史'], 'LONGYU_HETU':[r'龙鱼河图'], 'TAIPING_YULAN':[r'太平御览'], 'LUXING':[r'吕刑']}
+          regs={k:[re.compile(x) for x in v] for k,v in POS.items()}; nregs={k:[re.compile(x) for x in v] for k,v in NEG.items()}; sregs={k:[re.compile(x) for x in v] for k,v in SRC.items()}
+          def hits(ctx, mp): return [k for k,rs in mp.items() if any(rx.search(ctx) for rx in rs)]
+
+          candidates=[]; summary=[]
+          per_cls=Counter(); per_cls_unique={k:set() for k in POS}; per_cls_rows={k:set() for k in POS}; negc=Counter(); src_cross=Counter()
+          for r in rows:
+            ctx=r.get('context') or ''
+            ps=hits(ctx,regs); ns=hits(ctx,nregs); ss=hits(ctx,sregs)
+            for n in ns: negc[n]+=1
+            if not ps: continue
+            rec={'source_path':r.get('source_path'),'shard_ordinal':r.get('shard_ordinal'),'row_no':r.get('row_no'),'match_start':r.get('match_start'),'match_end':r.get('match_end'),'positive_classes':'|'.join(ps),'negative_flags':'|'.join(ns),'source_markers':'|'.join(ss),'context':ctx}
+            candidates.append(rec)
+            for p in ps:
+              per_cls[p]+=1; per_cls_unique[p].add(ctx); per_cls_rows[p].add((r.get('source_path'),r.get('row_no')))
+              for s in ss: src_cross[(p,s)]+=1
+          for p in POS:
+            summary.append({'class':p,'hits':per_cls[p],'distinct_rows':len(per_cls_rows[p]),'unique_contexts':len(per_cls_unique[p]),'share_of_literature_chiyou':round(per_cls[p]/max(1,len(rows)),8)})
+
+          with (OUT/'candidates.csv').open('w',encoding='utf-8-sig',newline='') as f:
+            fields=list(candidates[0].keys()) if candidates else ['source_path','shard_ordinal','row_no','match_start','match_end','positive_classes','negative_flags','source_markers','context']
+            w=csv.DictWriter(f,fieldnames=fields); w.writeheader(); w.writerows(candidates)
+          with (OUT/'summary.csv').open('w',encoding='utf-8-sig',newline='') as f:
+            w=csv.DictWriter(f,fieldnames=list(summary[0].keys())); w.writeheader(); w.writerows(summary)
+          sc=[{'class':p,'source_marker':s,'hits':n} for (p,s),n in src_cross.items()]
+          with (OUT/'source_cross.csv').open('w',encoding='utf-8-sig',newline='') as f:
+            w=csv.DictWriter(f,fieldnames=['class','source_marker','hits']); w.writeheader(); w.writerows(sorted(sc,key=lambda x:x['hits'],reverse=True))
+          # deterministic compact sample: first 60 exact-unique contexts per class, prefer no negative flags
+          sam=[]
+          for p in POS:
+            xs=[x for x in candidates if p in x['positive_classes'].split('|')]
+            xs.sort(key=lambda x:(bool(x['negative_flags']),x['source_path'] or '',int(x['row_no'] or -1),int(x['match_start'] or -1)))
+            seen=set()
+            for x in xs:
+              if x['context'] in seen: continue
+              seen.add(x['context']); sam.append({'class':p,**x})
+              if len(seen)>=60: break
+          with (OUT/'samples.jsonl').open('w',encoding='utf-8') as f:
+            for x in sam: f.write(json.dumps(x,ensure_ascii=False)+'\n')
+          m={'schema_version':'P2A-CHIYOU-NAMING-HP-1.0','source_run_id':int(os.environ['SOURCE_RUN_ID']),'source_artifact_id':int(os.environ['SOURCE_ARTIFACT_ID']),'source_sha256':os.environ['SOURCE_SHA256'],'view':'RESEARCH_OCCURRENCE','corpus':'Literature-zh','literature_chiyou_occurrences':len(rows),'candidate_rows':len(candidates),'classes_nonexclusive':True,'negative_flags':dict(negc),'warning':'High-precision regex candidates remain retrieval diagnostics; each historical claim still requires source-family and syntax review.'}
+          (OUT/'manifest.json').write_text(json.dumps(m,ensure_ascii=False,indent=2),encoding='utf-8')
+          print(json.dumps({'manifest':m,'summary':summary,'top_source_cross':sorted(sc,key=lambda x:x['hits'],reverse=True)[:30]},ensure_ascii=False,indent=2))
+          PY
+      - name: Gate
+        run: |
+          python - <<'PY'
+          import csv,json
+          from pathlib import Path
+          m=json.loads(Path('naming_out/manifest.json').read_text(encoding='utf-8'))
+          s=list(csv.DictReader(Path('naming_out/summary.csv').open(encoding='utf-8-sig')))
+          assert m['view']=='RESEARCH_OCCURRENCE'
+          assert m['corpus']=='Literature-zh'
+          assert m['literature_chiyou_occurrences']==28354
+          assert len(s)==6
+          print({'gate':'PASS','literature_chiyou_occurrences':m['literature_chiyou_occurrences'],'candidate_rows':m['candidate_rows']})
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: p2a-chiyou-naming-highprecision-phase1d
+          path: naming_out/
+          retention-days: 90
