@@ -55,16 +55,6 @@ jobs:
           }
           EOF
 
-      - name: Upload Drive-safe chunk artifacts
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          # Use gh artifact upload REST via actions/upload-artifact dynamically is not available;
-          # emit matrix-free upload steps through a generated composite list is unsupported.
-          # Instead package each chunk with GitHub CLI artifact cache API is intentionally avoided.
-          echo 'Chunks prepared; subsequent explicit upload-artifact steps handle them.'
-
       - name: Upload manifest
         uses: actions/upload-artifact@v4
         with:
@@ -72,85 +62,332 @@ jobs:
           path: manifest/
           retention-days: 90
           compression-level: 0
-      - name: Upload chunk 00-09
+      - name: Upload chunk 00
         uses: actions/upload-artifact@v4
         with:
-          name: p2a-drive90-chunks-00-09
-          path: |
-            chunks/p2a-registry-final.zip.part-00
-            chunks/p2a-registry-final.zip.part-01
-            chunks/p2a-registry-final.zip.part-02
-            chunks/p2a-registry-final.zip.part-03
-            chunks/p2a-registry-final.zip.part-04
-            chunks/p2a-registry-final.zip.part-05
-            chunks/p2a-registry-final.zip.part-06
-            chunks/p2a-registry-final.zip.part-07
-            chunks/p2a-registry-final.zip.part-08
-            chunks/p2a-registry-final.zip.part-09
+          name: p2a-drive90-chunk-00
+          path: chunks/p2a-registry-final.zip.part-00
           retention-days: 90
           compression-level: 0
-      - name: Upload chunk 10-19
+      - name: Upload chunk 01
         uses: actions/upload-artifact@v4
         with:
-          name: p2a-drive90-chunks-10-19
-          path: |
-            chunks/p2a-registry-final.zip.part-10
-            chunks/p2a-registry-final.zip.part-11
-            chunks/p2a-registry-final.zip.part-12
-            chunks/p2a-registry-final.zip.part-13
-            chunks/p2a-registry-final.zip.part-14
-            chunks/p2a-registry-final.zip.part-15
-            chunks/p2a-registry-final.zip.part-16
-            chunks/p2a-registry-final.zip.part-17
-            chunks/p2a-registry-final.zip.part-18
-            chunks/p2a-registry-final.zip.part-19
+          name: p2a-drive90-chunk-01
+          path: chunks/p2a-registry-final.zip.part-01
           retention-days: 90
           compression-level: 0
-      - name: Upload chunk 20-29
+      - name: Upload chunk 02
         uses: actions/upload-artifact@v4
         with:
-          name: p2a-drive90-chunks-20-29
-          path: |
-            chunks/p2a-registry-final.zip.part-20
-            chunks/p2a-registry-final.zip.part-21
-            chunks/p2a-registry-final.zip.part-22
-            chunks/p2a-registry-final.zip.part-23
-            chunks/p2a-registry-final.zip.part-24
-            chunks/p2a-registry-final.zip.part-25
-            chunks/p2a-registry-final.zip.part-26
-            chunks/p2a-registry-final.zip.part-27
-            chunks/p2a-registry-final.zip.part-28
-            chunks/p2a-registry-final.zip.part-29
+          name: p2a-drive90-chunk-02
+          path: chunks/p2a-registry-final.zip.part-02
           retention-days: 90
           compression-level: 0
-      - name: Upload chunk 30-39
+      - name: Upload chunk 03
         uses: actions/upload-artifact@v4
         with:
-          name: p2a-drive90-chunks-30-39
-          path: |
-            chunks/p2a-registry-final.zip.part-30
-            chunks/p2a-registry-final.zip.part-31
-            chunks/p2a-registry-final.zip.part-32
-            chunks/p2a-registry-final.zip.part-33
-            chunks/p2a-registry-final.zip.part-34
-            chunks/p2a-registry-final.zip.part-35
-            chunks/p2a-registry-final.zip.part-36
-            chunks/p2a-registry-final.zip.part-37
-            chunks/p2a-registry-final.zip.part-38
-            chunks/p2a-registry-final.zip.part-39
+          name: p2a-drive90-chunk-03
+          path: chunks/p2a-registry-final.zip.part-03
           retention-days: 90
           compression-level: 0
-      - name: Upload chunk 40-46
+      - name: Upload chunk 04
         uses: actions/upload-artifact@v4
         with:
-          name: p2a-drive90-chunks-40-46
-          path: |
-            chunks/p2a-registry-final.zip.part-40
-            chunks/p2a-registry-final.zip.part-41
-            chunks/p2a-registry-final.zip.part-42
-            chunks/p2a-registry-final.zip.part-43
-            chunks/p2a-registry-final.zip.part-44
-            chunks/p2a-registry-final.zip.part-45
-            chunks/p2a-registry-final.zip.part-46
+          name: p2a-drive90-chunk-04
+          path: chunks/p2a-registry-final.zip.part-04
+          retention-days: 90
+          compression-level: 0
+      - name: Upload chunk 05
+        uses: actions/upload-artifact@v4
+        with:
+          name: p2a-drive90-chunk-05
+          path: chunks/p2a-registry-final.zip.part-05
+          retention-days: 90
+          compression-level: 0
+      - name: Upload chunk 06
+        uses: actions/upload-artifact@v4
+        with:
+          name: p2a-drive90-chunk-06
+          path: chunks/p2a-registry-final.zip.part-06
+          retention-days: 90
+          compression-level: 0
+      - name: Upload chunk 07
+        uses: actions/upload-artifact@v4
+        with:
+          name: p2a-drive90-chunk-07
+          path: chunks/p2a-registry-final.zip.part-07
+          retention-days: 90
+          compression-level: 0
+      - name: Upload chunk 08
+        uses: actions/upload-artifact@v4
+        with:
+          name: p2a-drive90-chunk-08
+          path: chunks/p2a-registry-final.zip.part-08
+          retention-days: 90
+          compression-level: 0
+      - name: Upload chunk 09
+        uses: actions/upload-artifact@v4
+        with:
+          name: p2a-drive90-chunk-09
+          path: chunks/p2a-registry-final.zip.part-09
+          retention-days: 90
+          compression-level: 0
+      - name: Upload chunk 10
+        uses: actions/upload-artifact@v4
+        with:
+          name: p2a-drive90-chunk-10
+          path: chunks/p2a-registry-final.zip.part-10
+          retention-days: 90
+          compression-level: 0
+      - name: Upload chunk 11
+        uses: actions/upload-artifact@v4
+        with:
+          name: p2a-drive90-chunk-11
+          path: chunks/p2a-registry-final.zip.part-11
+          retention-days: 90
+          compression-level: 0
+      - name: Upload chunk 12
+        uses: actions/upload-artifact@v4
+        with:
+          name: p2a-drive90-chunk-12
+          path: chunks/p2a-registry-final.zip.part-12
+          retention-days: 90
+          compression-level: 0
+      - name: Upload chunk 13
+        uses: actions/upload-artifact@v4
+        with:
+          name: p2a-drive90-chunk-13
+          path: chunks/p2a-registry-final.zip.part-13
+          retention-days: 90
+          compression-level: 0
+      - name: Upload chunk 14
+        uses: actions/upload-artifact@v4
+        with:
+          name: p2a-drive90-chunk-14
+          path: chunks/p2a-registry-final.zip.part-14
+          retention-days: 90
+          compression-level: 0
+      - name: Upload chunk 15
+        uses: actions/upload-artifact@v4
+        with:
+          name: p2a-drive90-chunk-15
+          path: chunks/p2a-registry-final.zip.part-15
+          retention-days: 90
+          compression-level: 0
+      - name: Upload chunk 16
+        uses: actions/upload-artifact@v4
+        with:
+          name: p2a-drive90-chunk-16
+          path: chunks/p2a-registry-final.zip.part-16
+          retention-days: 90
+          compression-level: 0
+      - name: Upload chunk 17
+        uses: actions/upload-artifact@v4
+        with:
+          name: p2a-drive90-chunk-17
+          path: chunks/p2a-registry-final.zip.part-17
+          retention-days: 90
+          compression-level: 0
+      - name: Upload chunk 18
+        uses: actions/upload-artifact@v4
+        with:
+          name: p2a-drive90-chunk-18
+          path: chunks/p2a-registry-final.zip.part-18
+          retention-days: 90
+          compression-level: 0
+      - name: Upload chunk 19
+        uses: actions/upload-artifact@v4
+        with:
+          name: p2a-drive90-chunk-19
+          path: chunks/p2a-registry-final.zip.part-19
+          retention-days: 90
+          compression-level: 0
+      - name: Upload chunk 20
+        uses: actions/upload-artifact@v4
+        with:
+          name: p2a-drive90-chunk-20
+          path: chunks/p2a-registry-final.zip.part-20
+          retention-days: 90
+          compression-level: 0
+      - name: Upload chunk 21
+        uses: actions/upload-artifact@v4
+        with:
+          name: p2a-drive90-chunk-21
+          path: chunks/p2a-registry-final.zip.part-21
+          retention-days: 90
+          compression-level: 0
+      - name: Upload chunk 22
+        uses: actions/upload-artifact@v4
+        with:
+          name: p2a-drive90-chunk-22
+          path: chunks/p2a-registry-final.zip.part-22
+          retention-days: 90
+          compression-level: 0
+      - name: Upload chunk 23
+        uses: actions/upload-artifact@v4
+        with:
+          name: p2a-drive90-chunk-23
+          path: chunks/p2a-registry-final.zip.part-23
+          retention-days: 90
+          compression-level: 0
+      - name: Upload chunk 24
+        uses: actions/upload-artifact@v4
+        with:
+          name: p2a-drive90-chunk-24
+          path: chunks/p2a-registry-final.zip.part-24
+          retention-days: 90
+          compression-level: 0
+      - name: Upload chunk 25
+        uses: actions/upload-artifact@v4
+        with:
+          name: p2a-drive90-chunk-25
+          path: chunks/p2a-registry-final.zip.part-25
+          retention-days: 90
+          compression-level: 0
+      - name: Upload chunk 26
+        uses: actions/upload-artifact@v4
+        with:
+          name: p2a-drive90-chunk-26
+          path: chunks/p2a-registry-final.zip.part-26
+          retention-days: 90
+          compression-level: 0
+      - name: Upload chunk 27
+        uses: actions/upload-artifact@v4
+        with:
+          name: p2a-drive90-chunk-27
+          path: chunks/p2a-registry-final.zip.part-27
+          retention-days: 90
+          compression-level: 0
+      - name: Upload chunk 28
+        uses: actions/upload-artifact@v4
+        with:
+          name: p2a-drive90-chunk-28
+          path: chunks/p2a-registry-final.zip.part-28
+          retention-days: 90
+          compression-level: 0
+      - name: Upload chunk 29
+        uses: actions/upload-artifact@v4
+        with:
+          name: p2a-drive90-chunk-29
+          path: chunks/p2a-registry-final.zip.part-29
+          retention-days: 90
+          compression-level: 0
+      - name: Upload chunk 30
+        uses: actions/upload-artifact@v4
+        with:
+          name: p2a-drive90-chunk-30
+          path: chunks/p2a-registry-final.zip.part-30
+          retention-days: 90
+          compression-level: 0
+      - name: Upload chunk 31
+        uses: actions/upload-artifact@v4
+        with:
+          name: p2a-drive90-chunk-31
+          path: chunks/p2a-registry-final.zip.part-31
+          retention-days: 90
+          compression-level: 0
+      - name: Upload chunk 32
+        uses: actions/upload-artifact@v4
+        with:
+          name: p2a-drive90-chunk-32
+          path: chunks/p2a-registry-final.zip.part-32
+          retention-days: 90
+          compression-level: 0
+      - name: Upload chunk 33
+        uses: actions/upload-artifact@v4
+        with:
+          name: p2a-drive90-chunk-33
+          path: chunks/p2a-registry-final.zip.part-33
+          retention-days: 90
+          compression-level: 0
+      - name: Upload chunk 34
+        uses: actions/upload-artifact@v4
+        with:
+          name: p2a-drive90-chunk-34
+          path: chunks/p2a-registry-final.zip.part-34
+          retention-days: 90
+          compression-level: 0
+      - name: Upload chunk 35
+        uses: actions/upload-artifact@v4
+        with:
+          name: p2a-drive90-chunk-35
+          path: chunks/p2a-registry-final.zip.part-35
+          retention-days: 90
+          compression-level: 0
+      - name: Upload chunk 36
+        uses: actions/upload-artifact@v4
+        with:
+          name: p2a-drive90-chunk-36
+          path: chunks/p2a-registry-final.zip.part-36
+          retention-days: 90
+          compression-level: 0
+      - name: Upload chunk 37
+        uses: actions/upload-artifact@v4
+        with:
+          name: p2a-drive90-chunk-37
+          path: chunks/p2a-registry-final.zip.part-37
+          retention-days: 90
+          compression-level: 0
+      - name: Upload chunk 38
+        uses: actions/upload-artifact@v4
+        with:
+          name: p2a-drive90-chunk-38
+          path: chunks/p2a-registry-final.zip.part-38
+          retention-days: 90
+          compression-level: 0
+      - name: Upload chunk 39
+        uses: actions/upload-artifact@v4
+        with:
+          name: p2a-drive90-chunk-39
+          path: chunks/p2a-registry-final.zip.part-39
+          retention-days: 90
+          compression-level: 0
+      - name: Upload chunk 40
+        uses: actions/upload-artifact@v4
+        with:
+          name: p2a-drive90-chunk-40
+          path: chunks/p2a-registry-final.zip.part-40
+          retention-days: 90
+          compression-level: 0
+      - name: Upload chunk 41
+        uses: actions/upload-artifact@v4
+        with:
+          name: p2a-drive90-chunk-41
+          path: chunks/p2a-registry-final.zip.part-41
+          retention-days: 90
+          compression-level: 0
+      - name: Upload chunk 42
+        uses: actions/upload-artifact@v4
+        with:
+          name: p2a-drive90-chunk-42
+          path: chunks/p2a-registry-final.zip.part-42
+          retention-days: 90
+          compression-level: 0
+      - name: Upload chunk 43
+        uses: actions/upload-artifact@v4
+        with:
+          name: p2a-drive90-chunk-43
+          path: chunks/p2a-registry-final.zip.part-43
+          retention-days: 90
+          compression-level: 0
+      - name: Upload chunk 44
+        uses: actions/upload-artifact@v4
+        with:
+          name: p2a-drive90-chunk-44
+          path: chunks/p2a-registry-final.zip.part-44
+          retention-days: 90
+          compression-level: 0
+      - name: Upload chunk 45
+        uses: actions/upload-artifact@v4
+        with:
+          name: p2a-drive90-chunk-45
+          path: chunks/p2a-registry-final.zip.part-45
+          retention-days: 90
+          compression-level: 0
+      - name: Upload chunk 46
+        uses: actions/upload-artifact@v4
+        with:
+          name: p2a-drive90-chunk-46
+          path: chunks/p2a-registry-final.zip.part-46
           retention-days: 90
           compression-level: 0
