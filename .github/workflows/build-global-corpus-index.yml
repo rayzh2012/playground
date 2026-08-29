@@ -1,0 +1,92 @@
+name: Build Global Corpus Index Pilot
+
+on:
+  push:
+    branches:
+      - master
+    paths:
+      - .github/workflows/build-global-corpus-index.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  index-26histories:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - name: Checkout indexing branch
+        uses: actions/checkout@v4
+        with:
+          ref: global-corpus-index-v1
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Syntax gate
+        run: python -m py_compile tools/global_corpus_index.py
+
+      - name: Fetch public 26 Histories corpus
+        run: |
+          mkdir -p external
+          git clone --depth 1 --filter=blob:none --sparse https://github.com/ahua/dataset.git external/ahua-dataset
+          git -C external/ahua-dataset sparse-checkout set '26史'
+          COUNT=$(find external/ahua-dataset/26史 -maxdepth 1 -type f -name '*.txt' | wc -l)
+          echo "26 Histories txt files: $COUNT"
+          test "$COUNT" -ge 26
+
+      - name: Build locator + lexical + entity occurrence index
+        run: |
+          rm -rf global_index_output/26histories
+          python tools/global_corpus_index.py \
+            --mode txt \
+            --input external/ahua-dataset/26史 \
+            --corpus-id GCI-HOLD-0003 \
+            --out global_index_output/26histories \
+            --registry corpus_index/entity_registry.tsv \
+            --pilot-queries '蚩尤,炎帝,赤帝,黄帝,共工,帝鸿,少昊,太昊,颛顼,九黎' \
+            --limit 25
+
+      - name: Acceptance gates
+        run: |
+          python - <<'PY'
+          import json, sqlite3
+          from pathlib import Path
+          root = Path('global_index_output/26histories')
+          m = json.loads((root/'manifest.json').read_text(encoding='utf-8'))
+          assert m['file_count'] >= 26, m
+          assert m['unit_count'] > 0, m
+          assert m['character_count'] > 30_000_000, m
+          assert m['raw_corpus_mutated'] is False, m
+          db = sqlite3.connect(root/'lexical_index.sqlite')
+          docs = db.execute('select count(*) from docs').fetchone()[0]
+          fts = db.execute('select count(*) from fts').fetchone()[0]
+          db.close()
+          assert docs == fts == m['unit_count'], (docs, fts, m['unit_count'])
+          assert (root/'query_smoke.csv').stat().st_size > 100
+          assert (root/'entity_occurrences.csv').stat().st_size > 100
+          print({'files':m['file_count'],'units':m['unit_count'],'chars':m['character_count'],'entity_occ':m['entity_occurrence_count']})
+          PY
+
+      - name: Upload reusable index artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: global-corpus-index-26histories
+          path: global_index_output/26histories/
+          retention-days: 90
+
+      - name: Persist small durable index manifests on analysis branch
+        run: |
+          mkdir -p artifacts/global_corpus_index/26histories
+          cp global_index_output/26histories/manifest.json artifacts/global_corpus_index/26histories/
+          cp global_index_output/26histories/source_manifest.csv artifacts/global_corpus_index/26histories/
+          cp global_index_output/26histories/entity_occurrences.csv artifacts/global_corpus_index/26histories/
+          cp global_index_output/26histories/query_smoke.csv artifacts/global_corpus_index/26histories/
+          git config user.name 'github-actions[bot]'
+          git config user.email '4189824+github-actions[bot]@users.noreply.github.com'
+          git add artifacts/global_corpus_index/26histories
+          git commit -m 'chore: persist global corpus index pilot manifests [skip ci]' || exit 0
+          git push origin HEAD:global-corpus-index-v1
