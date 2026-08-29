@@ -1,0 +1,135 @@
+name: Merge Repaired 508GB Registry Baseline
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - .github/workflows/merge-registry-508gb-repaired.yml
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: write
+
+jobs:
+  merge:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: global-corpus-index-v1
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install merge dependency
+        run: python -m pip install --disable-pip-version-check 'pyarrow>=23,<24'
+      - name: Download all 124 original batch artifacts with paginated gh client
+        run: |
+          rm -rf batch_results
+          mkdir -p batch_results
+          gh run download 33227544380 \
+            --repo rayzh2012/playground \
+            --pattern 'registry-*' \
+            --dir batch_results
+      - name: Download repaired Literature 161-165 artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: registry-lit-161-165
+          path: batch_results/registry-lit-161-165
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          repository: rayzh2012/playground
+          run-id: 33228664166
+      - name: Pre-merge 125-batch truth gate
+        run: |
+          python - <<'PY'
+          import re
+          from pathlib import Path
+          roots=[]
+          for p in Path('batch_results').rglob('manifest.json'):
+              # Each artifact is expected to own exactly one manifest at its extracted root.
+              roots.append(p.parent)
+          names=sorted({p.name for p in roots})
+          print({'manifest_count':len(roots),'unique_batch_roots':len(names),'first':names[:8],'last':names[-8:]})
+          assert len(roots)==125,(len(roots),[str(p) for p in roots[:20]])
+          assert len(names)==125,(len(names),names)
+          assert 'registry-lit-161-165' in names,names
+
+          lit=[]; cwt=[]
+          for n in names:
+              m=re.fullmatch(r'registry-lit-(\d+)-(\d+)',n)
+              if m: lit.append((int(m.group(1)),int(m.group(2))))
+              m=re.fullmatch(r'registry-cwt-(\d+)-(\d+)',n)
+              if m: cwt.append((int(m.group(1)),int(m.group(2))))
+          assert len(lit)==47,(len(lit),lit)
+          assert len(cwt)==78,(len(cwt),cwt)
+          lit_ord=[i for a,b in lit for i in range(a,b+1)]
+          cwt_ord=[i for a,b in cwt for i in range(a,b+1)]
+          assert sorted(lit_ord)==list(range(1,234)),(lit[:5],lit[-5:],len(lit_ord))
+          assert sorted(cwt_ord)==list(range(0,1555)),(cwt[:5],cwt[-5:],len(cwt_ord))
+          print({'literature_batches':len(lit),'literature_shards':len(lit_ord),'cwt_batches':len(cwt),'cwt_shards':len(cwt_ord)})
+          PY
+      - name: Merge all 125 batches
+        run: |
+          rm -rf merged_index
+          python tools/merge_registry_scan.py \
+            --input-root batch_results \
+            --out merged_index \
+            --expected-shards 1788
+      - name: Final 1788-shard and quality truth gate
+        run: |
+          python - <<'PY'
+          import csv,json
+          from pathlib import Path
+          m=json.loads(Path('merged_index/manifest.json').read_text(encoding='utf-8'))
+          rows=list(csv.DictReader(Path('merged_index/shard_summary.csv').open(encoding='utf-8-sig')))
+          lit=[int(r['shard_ordinal']) for r in rows if r['corpus_id']=='GCI-HOLD-0001']
+          cwt=[int(r['shard_ordinal']) for r in rows if r['corpus_id']=='GCI-HOLD-0002']
+          assert m['batch_count']==125,m
+          assert m['shard_count']==1788,m
+          assert m['expected_shards']==1788,m
+          assert m['occurrence_count']==m['raw_occurrence_count'],m
+          assert m['raw_occurrence_count']==m['research_occurrence_count']+m['hard_false_positive_count'],m
+          assert m['precision_policy_alias_count']==34,m
+          assert m['raw_mutated'] is False,m
+          assert lit==list(range(1,234)),(lit[:5],lit[-5:],len(lit))
+          assert cwt==list(range(0,1555)),(cwt[:5],cwt[-5:],len(cwt))
+          assert len(rows)==len({(r['corpus_id'],r['shard_ordinal']) for r in rows})==1788
+          for required in [
+              'registry_occurrences_raw.parquet','research_occurrences.parquet',
+              'by_alias_index.csv','term_totals.csv','research_term_totals.csv','shard_summary.csv']:
+              assert (Path('merged_index')/required).exists(),required
+          print(m)
+          PY
+      - name: Query smoke on canonical merged index
+        run: |
+          python tools/query_registry_index.py --index-root merged_index --alias 共工 --limit 5 > query_gonggong.jsonl
+          python tools/query_registry_index.py --index-root merged_index --alias 黄帝氏 --limit 5 > query_huangdishi.jsonl
+          test -s query_gonggong.jsonl
+          test -s query_huangdishi.jsonl
+      - name: Upload canonical merged registry index
+        uses: actions/upload-artifact@v4
+        with:
+          name: global-corpus-registry-occurrence-index
+          path: merged_index/
+          retention-days: 90
+          compression-level: 0
+      - name: Persist durable manifests on analysis branch
+        run: |
+          mkdir -p artifacts/global_corpus_index/registry_508gb
+          cp merged_index/manifest.json artifacts/global_corpus_index/registry_508gb/
+          cp merged_index/shard_summary.csv artifacts/global_corpus_index/registry_508gb/
+          cp merged_index/term_totals.csv artifacts/global_corpus_index/registry_508gb/
+          cp merged_index/research_term_totals.csv artifacts/global_corpus_index/registry_508gb/
+          cp merged_index/by_alias_index.csv artifacts/global_corpus_index/registry_508gb/
+          cp corpus_index/alias_precision_policy.tsv artifacts/global_corpus_index/registry_508gb/
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add artifacts/global_corpus_index/registry_508gb
+          git commit -m 'chore: persist canonical 508GB registry baseline [skip ci]' || true
+          git fetch origin global-corpus-index-v1
+          git rebase origin/global-corpus-index-v1
+          git push origin HEAD:global-corpus-index-v1
