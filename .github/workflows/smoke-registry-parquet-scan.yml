@@ -1,0 +1,77 @@
+name: Smoke Registry Parquet Scan
+
+on:
+  push:
+    branches:
+      - master
+    paths:
+      - .github/workflows/smoke-registry-parquet-scan.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - corpus: literature
+            start: 232
+            end: 233
+          - corpus: cwt
+            start: 1553
+            end: 1554
+    steps:
+      - name: Checkout indexing branch
+        uses: actions/checkout@v4
+        with:
+          ref: global-corpus-index-v1
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: python -m pip install --disable-pip-version-check 'huggingface_hub[hf_xet]' 'pyarrow>=23,<24' pyahocorasick
+
+      - name: Syntax gate
+        run: python -m py_compile tools/scan_registry_parquet_batch.py
+
+      - name: Scan two shards with all aliases
+        run: |
+          OUT="global_index_output/registry_smoke/${{ matrix.corpus }}_${{ matrix.start }}_${{ matrix.end }}"
+          python tools/scan_registry_parquet_batch.py \
+            --corpus '${{ matrix.corpus }}' \
+            --start '${{ matrix.start }}' \
+            --end '${{ matrix.end }}' \
+            --registry corpus_index/entity_registry.tsv \
+            --out "$OUT"
+
+      - name: Acceptance gate
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          root=Path("global_index_output/registry_smoke/${{ matrix.corpus }}_${{ matrix.start }}_${{ matrix.end }}")
+          m=json.loads((root/'manifest.json').read_text(encoding='utf-8'))
+          assert m['shard_count']==2,m
+          assert m['registry_alias_count']==34,m
+          assert m['occurrence_count']>0,m
+          assert m['raw_mutated'] is False,m
+          assert (root/'occurrences.parquet').stat().st_size>100,m
+          assert (root/'shard_summary.csv').stat().st_size>100,m
+          print(m)
+          PY
+
+      - name: Upload smoke artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: registry-smoke-${{ matrix.corpus }}-${{ matrix.start }}-${{ matrix.end }}
+          path: global_index_output/registry_smoke/${{ matrix.corpus }}_${{ matrix.start }}_${{ matrix.end }}/
+          retention-days: 30
