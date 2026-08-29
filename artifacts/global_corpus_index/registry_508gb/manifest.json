@@ -1,0 +1,28 @@
+{
+  "schema_version": "GCI-REGISTRY-MERGE-1.2",
+  "batch_count": 125,
+  "shard_count": 1788,
+  "expected_shards": 1788,
+  "occurrence_count": 8628030,
+  "raw_occurrence_count": 8628030,
+  "research_occurrence_count": 8541365,
+  "hard_false_positive_count": 86665,
+  "alias_file_count": 34,
+  "precision_policy_alias_count": 34,
+  "corpora": [
+    "GCI-HOLD-0001",
+    "GCI-HOLD-0002"
+  ],
+  "raw_mutated": false,
+  "locator_contract": "corpus_id + shard_ordinal + source_path + row_no + match_start/match_end",
+  "quality_contract": "RAW_OCCURRENCE is never deleted; RESEARCH_OCCURRENCE excludes only deterministic hard false positives from explicit policy. LOW/MEDIUM precision hits remain and require context review.",
+  "outputs": [
+    "registry_occurrences_raw.parquet",
+    "research_occurrences.parquet",
+    "by_alias/",
+    "by_alias_index.csv",
+    "shard_summary.csv",
+    "term_totals.csv",
+    "research_term_totals.csv"
+  ]
+}

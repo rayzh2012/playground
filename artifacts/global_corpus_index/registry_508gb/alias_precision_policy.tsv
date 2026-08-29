@@ -1,0 +1,35 @@
+alias	precision_class	hard_false_positive_substrings	policy_note
+蚩尤	HIGH		Specific mythic/political label; retain all lexical hits for review.
+炎帝	HIGH		Specific title/name; context still distinguishes ruler, cult, scholarship, quotation.
+赤帝	HIGH		Specific color-emperor title; source-context classification required.
+黄帝	MEDIUM		Specific spelling but frequent in 黄帝内经, medicine, five-color systems, modern scholarship; do not delete, classify context.
+黄帝氏	HIGH		House/polity syntax; high retrieval precision.
+轩辕	MEDIUM		Can denote Huangdi, constellation, place, brand/game/modern names; keep but context-classify.
+轩辕氏	HIGH		House/alias form; high retrieval precision.
+有熊氏	HIGH		Rare house/polity form.
+帝鸿	HIGH		Rare holder/house form.
+帝鸿氏	HIGH		Rare house form.
+帝江	HIGH		Rare deity/entity form; do not merge with 帝鸿.
+共工	LOW	公共工程	Known deterministic substring collision: 公共工程 contains 共工. Preserve RAW hit; flag hard false positive in research view.
+共工氏	HIGH		House/polity form; avoids 公共工程 collision.
+少昊	HIGH		Specific holder/house form.
+少皞	HIGH		Specific orthographic form.
+太昊	HIGH		Specific holder/house form.
+太皞	HIGH		Specific orthographic form.
+颛顼	HIGH		Specific holder/house form.
+神农	MEDIUM		Can denote mythic holder/title, medicine/agriculture/cultural labels; context-classify.
+榆罔	HIGH		Rare holder name.
+九黎	HIGH		Specific polity/house label.
+阪泉	HIGH		Specific place/polity label.
+涿鹿	MEDIUM		Ancient place/war label but also modern toponym; context-classify.
+应龙	HIGH		Specific mythic label.
+风伯	MEDIUM		Mythic/office label and literary/weather usage; context-classify.
+雨师	MEDIUM		Mythic/office label and literary/weather usage; context-classify.
+女娲	HIGH		Specific deity/holder form.
+女娃	LOW		Also productive modern colloquial noun for girl; retain but context-classify, never auto-merge with 女娲.
+精卫	MEDIUM		Mythic bird/name plus modern proper names; context-classify.
+后土	MEDIUM		Can be deity/office/classical common noun; context-classify.
+句龙	HIGH		Rare holder/office form.
+鲧	MEDIUM		Single-character name; relatively rare but require context.
+禹	LOW		Single-character name/surname/modern proper-name collision risk; retain all and context-classify.
+缙云氏	HIGH		Rare polity/office/house form.
