@@ -1,0 +1,57 @@
+name: Build Chiyou Early Witness Graph
+on:
+  push:
+    paths:
+      - '.github/workflows/build-chiyou-early-witness-graph.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build graph files
+        shell: python
+        run: |
+          import csv, json, hashlib, pathlib
+          out=pathlib.Path('out'); out.mkdir()
+          edges=[
+            {'source':'蚩尤','relation':'作乱','target':'天下/平民','witness':'《尚书·吕刑》正文','layer':'ORIGINAL_TEXT','date_bucket':'pre-Qin transmitted text','polarity':'SUPPORT','note':'正文只锁蚩尤始作乱；不写九黎之君。'},
+            {'source':'赤帝','relation':'命','target':'蚩尤','witness':'《逸周书·尝麦》正文','layer':'ORIGINAL_TEXT','date_bucket':'early transmitted text','polarity':'SUPPORT','note':'命蚩尤于宇少昊；赤帝为原文用字。'},
+            {'source':'蚩尤','relation':'逐','target':'赤帝','witness':'《逸周书·尝麦》正文','layer':'ORIGINAL_TEXT','date_bucket':'early transmitted text','polarity':'SUPPORT','note':'蚩尤乃逐帝。'},
+            {'source':'赤帝','relation':'求援/说于','target':'黄帝','witness':'《逸周书·尝麦》正文','layer':'ORIGINAL_TEXT','date_bucket':'early transmitted text','polarity':'SUPPORT','note':'赤帝大慑，乃说于黄帝。'},
+            {'source':'黄帝','relation':'执杀','target':'蚩尤','witness':'《逸周书·尝麦》正文','layer':'ORIGINAL_TEXT','date_bucket':'early transmitted text','polarity':'SUPPORT','note':'执蚩尤，杀之于中冀。'},
+            {'source':'蚩尤','relation':'争于','target':'涿鹿','witness':'《逸周书·尝麦》正文','layer':'ORIGINAL_TEXT','date_bucket':'early transmitted text','polarity':'SUPPORT','note':'争于涿鹿之河。'},
+            {'source':'蚩尤','relation':'九黎君名','target':'九黎','witness':'马融《尚书》注（《释文》等引）','layer':'EARLY_COMMENTARY','date_bucket':'Eastern Han','polarity':'IDENTITY_SUPPORT','note':'蚩尤，少昊之末，九黎君名。'},
+            {'source':'九黎之君','relation':'学蚩尤为乱','target':'蚩尤','witness':'郑玄《尚书》注（孔疏引）','layer':'EARLY_COMMENTARY','date_bucket':'Eastern Han','polarity':'IDENTITY_OPPOSE','note':'把九黎与蚩尤分成先后两层。'},
+            {'source':'九黎','relation':'蚩尤之徒','target':'蚩尤','witness':'韦昭《国语·楚语下》注','layer':'EARLY_COMMENTARY','date_bucket':'Three Kingdoms','polarity':'AFFILIATION_SUPPORT_IDENTITY_OPPOSE','note':'九黎，黎氏九人，蚩尤之徒也。'},
+            {'source':'九黎之君','relation':'号曰','target':'蚩尤','witness':'伪孔传《尚书·吕刑》','layer':'COMMENTARY','date_bucket':'received Kong tradition','polarity':'IDENTITY_SUPPORT','note':'孔颖达疏称当有旧说云然，不知出何书。'},
+            {'source':'赤帝','relation':'即/释为','target':'炎帝/神农','witness':'高诱《淮南子·时则训》注','layer':'EARLY_COMMENTARY','date_bucket':'Eastern Han','polarity':'IDENTITY_SUPPORT_GENERIC','note':'赤帝，炎帝少典之子，号为神农；这是通用帝系解释，不是《尝麦》正文。'},
+            {'source':'阪泉氏','relation':'徙居','target':'独鹿','witness':'《逸周书·史记解》正文','layer':'ORIGINAL_TEXT','date_bucket':'transmitted text','polarity':'SUPPORT','note':'武不止者亡段；独鹿是否即涿鹿另议。'},
+            {'source':'涿鹿城','relation':'东一里有','target':'阪泉','witness':'《水经注》卷十三引《魏土地记》','layer':'PREMODERN_GEOGRAPHY','date_bucket':'Northern Wei transmitted geography','polarity':'COLOCATION_SUPPORT','note':'支持地理紧邻，不等于同一场战争。'},
+            {'source':'阪泉水','relation':'会','target':'蚩尤泉','witness':'《水经注》卷十三','layer':'PREMODERN_GEOGRAPHY','date_bucket':'Northern Wei','polarity':'COLOCATION_SUPPORT','note':'阪泉—蚩尤地理记忆处于同一局部水系。'}
+          ]
+          fields=list(edges[0].keys())
+          with open(out/'early_witness_edges.csv','w',encoding='utf-8-sig',newline='') as f:
+            w=csv.DictWriter(f,fieldnames=fields); w.writeheader(); w.writerows(edges)
+          json.dump({'schema_version':'1.0','edge_count':len(edges),'edges':edges},open(out/'early_witness_graph.json','w',encoding='utf-8'),ensure_ascii=False,indent=2)
+          manifest={'edge_count':len(edges),'rules':['ORIGINAL_TEXT outranks commentary for wording claims','identity-support and identity-oppose edges coexist','co-location does not imply same event','generic 赤帝=炎帝 commentary does not rewrite 尝麦 wording']}
+          for fn in ['early_witness_edges.csv','early_witness_graph.json']:
+            b=(out/fn).read_bytes(); manifest[fn]={'bytes':len(b),'sha256':hashlib.sha256(b).hexdigest()}
+          json.dump(manifest,open(out/'manifest.json','w',encoding='utf-8'),ensure_ascii=False,indent=2)
+          assert len(edges)==14
+          assert any(e['polarity']=='IDENTITY_OPPOSE' for e in edges)
+          assert any(e['layer']=='ORIGINAL_TEXT' and e['source']=='赤帝' and e['target']=='蚩尤' for e in edges)
+      - name: Gate
+        run: python - <<'PY'
+          import json
+          m=json.load(open('out/manifest.json'))
+          assert m['edge_count']==14
+          print('EARLY_WITNESS_GRAPH_GATE=PASS')
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: chiyou-early-witness-graph
+          path: out/
+          if-no-files-found: error
