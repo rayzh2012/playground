@@ -1,0 +1,153 @@
+name: Repair 508GB Registry Literature 161-165
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - .github/workflows/repair-registry-lit-161-165.yml
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: write
+
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: global-corpus-index-v1
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install dependencies
+        run: python -m pip install --disable-pip-version-check 'huggingface_hub[hf_xet]' 'pyarrow>=23,<24' pyahocorasick
+      - name: Syntax gate
+        run: |
+          python -m py_compile tools/scan_registry_parquet_batch.py
+          python -m py_compile tools/merge_registry_scan.py
+          python -m py_compile tools/query_registry_index.py
+      - name: Scan only missing Literature shards 161-165
+        run: |
+          rm -rf repair_output/literature_161_165
+          python tools/scan_registry_parquet_batch.py \
+            --corpus literature \
+            --start 161 \
+            --end 165 \
+            --registry corpus_index/entity_registry.tsv \
+            --out repair_output/literature_161_165
+      - name: Repair acceptance gate
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          root=Path('repair_output/literature_161_165')
+          m=json.loads((root/'manifest.json').read_text(encoding='utf-8'))
+          assert m['shard_count']==5,m
+          assert m['registry_alias_count']==34,m
+          assert m['raw_mutated'] is False,m
+          assert (root/'occurrences.parquet').exists(),m
+          assert (root/'shard_summary.csv').exists(),m
+          assert (root/'term_totals.csv').exists(),m
+          print(m)
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: registry-lit-161-165
+          path: repair_output/literature_161_165/
+          retention-days: 90
+          compression-level: 0
+
+  merge:
+    needs: repair
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: global-corpus-index-v1
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install merge dependency
+        run: python -m pip install --disable-pip-version-check 'pyarrow>=23,<24'
+      - name: Download original 124 successful batch artifacts
+        uses: actions/download-artifact@v4
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          repository: rayzh2012/playground
+          run-id: 33227544380
+          pattern: registry-*
+          path: batch_results
+      - name: Download repaired missing batch
+        uses: actions/download-artifact@v4
+        with:
+          name: registry-lit-161-165
+          path: batch_results/registry-lit-161-165
+      - name: Pre-merge batch-set truth gate
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          names=sorted({p.parent.name for p in Path('batch_results').rglob('manifest.json')})
+          print({'batch_manifests':len(names),'first':names[:5],'last':names[-5:]})
+          assert len(names)==125,(len(names),names)
+          assert 'registry-lit-161-165' in names,names
+          PY
+      - name: Merge all 125 batches
+        run: |
+          rm -rf merged_index
+          python tools/merge_registry_scan.py \
+            --input-root batch_results \
+            --out merged_index \
+            --expected-shards 1788
+      - name: Final 1788-shard truth gate
+        run: |
+          python - <<'PY'
+          import csv,json
+          from pathlib import Path
+          m=json.loads(Path('merged_index/manifest.json').read_text(encoding='utf-8'))
+          rows=list(csv.DictReader(Path('merged_index/shard_summary.csv').open(encoding='utf-8-sig')))
+          lit=[int(r['shard_ordinal']) for r in rows if r['corpus_id']=='GCI-HOLD-0001']
+          cwt=[int(r['shard_ordinal']) for r in rows if r['corpus_id']=='GCI-HOLD-0002']
+          assert m['batch_count']==125,m
+          assert m['shard_count']==1788,m
+          assert m['expected_shards']==1788,m
+          assert m['occurrence_count']==m['raw_occurrence_count'],m
+          assert m['raw_occurrence_count']==m['research_occurrence_count']+m['hard_false_positive_count'],m
+          assert m['precision_policy_alias_count']==34,m
+          assert m['raw_mutated'] is False,m
+          assert lit==list(range(1,234)),(lit[:5],lit[-5:],len(lit))
+          assert cwt==list(range(0,1555)),(cwt[:5],cwt[-5:],len(cwt))
+          assert len(rows)==len({(r['corpus_id'],r['shard_ordinal']) for r in rows})==1788
+          assert Path('merged_index/registry_occurrences_raw.parquet').exists()
+          assert Path('merged_index/research_occurrences.parquet').exists()
+          assert Path('merged_index/by_alias_index.csv').exists()
+          print(m)
+          PY
+      - name: Upload canonical merged registry index
+        uses: actions/upload-artifact@v4
+        with:
+          name: global-corpus-registry-occurrence-index
+          path: merged_index/
+          retention-days: 90
+          compression-level: 0
+      - name: Persist durable manifests on analysis branch
+        run: |
+          mkdir -p artifacts/global_corpus_index/registry_508gb
+          cp merged_index/manifest.json artifacts/global_corpus_index/registry_508gb/
+          cp merged_index/shard_summary.csv artifacts/global_corpus_index/registry_508gb/
+          cp merged_index/term_totals.csv artifacts/global_corpus_index/registry_508gb/
+          cp merged_index/research_term_totals.csv artifacts/global_corpus_index/registry_508gb/
+          cp merged_index/by_alias_index.csv artifacts/global_corpus_index/registry_508gb/
+          cp corpus_index/alias_precision_policy.tsv artifacts/global_corpus_index/registry_508gb/
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add artifacts/global_corpus_index/registry_508gb
+          git commit -m 'chore: persist canonical 508GB registry baseline [skip ci]' || true
+          git fetch origin global-corpus-index-v1
+          git rebase origin/global-corpus-index-v1
+          git push origin HEAD:global-corpus-index-v1
