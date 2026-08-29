@@ -1,0 +1,140 @@
+{
+  "canonical_file_count": 26,
+  "normalized_source_character_count": 36871517,
+  "expected_normalized_source_character_count": 36871517,
+  "legacy_expected_constant": 36871518,
+  "legacy_constant_error": "附25新元史 expected 2,027,142; durable manifest measures 2,027,141",
+  "exact_match": true,
+  "files": [
+    {
+      "file": "01史记.txt",
+      "normalized_chars": 640501,
+      "bytes": 1876254
+    },
+    {
+      "file": "02汉书.txt",
+      "normalized_chars": 937972,
+      "bytes": 2750460
+    },
+    {
+      "file": "03后汉书.txt",
+      "normalized_chars": 883521,
+      "bytes": 2564644
+    },
+    {
+      "file": "04三国志.txt",
+      "normalized_chars": 854325,
+      "bytes": 2542364
+    },
+    {
+      "file": "05晋书.txt",
+      "normalized_chars": 1453803,
+      "bytes": 4265313
+    },
+    {
+      "file": "06宋书.txt",
+      "normalized_chars": 1028274,
+      "bytes": 3008514
+    },
+    {
+      "file": "07南齐书.txt",
+      "normalized_chars": 385031,
+      "bytes": 1116834
+    },
+    {
+      "file": "08梁书.txt",
+      "normalized_chars": 368183,
+      "bytes": 1087275
+    },
+    {
+      "file": "09陈书.txt",
+      "normalized_chars": 202689,
+      "bytes": 598415
+    },
+    {
+      "file": "10魏书.txt",
+      "normalized_chars": 1281297,
+      "bytes": 3716909
+    },
+    {
+      "file": "11北齐书.txt",
+      "normalized_chars": 263571,
+      "bytes": 779030
+    },
+    {
+      "file": "12周书.txt",
+      "normalized_chars": 327629,
+      "bytes": 964508
+    },
+    {
+      "file": "13隋书.txt",
+      "normalized_chars": 909341,
+      "bytes": 2651646
+    },
+    {
+      "file": "14北史.txt",
+      "normalized_chars": 1382313,
+      "bytes": 4078104
+    },
+    {
+      "file": "15南史.txt",
+      "normalized_chars": 846370,
+      "bytes": 2494030
+    },
+    {
+      "file": "16旧唐书.txt",
+      "normalized_chars": 2490424,
+      "bytes": 7299286
+    },
+    {
+      "file": "17新唐书.txt",
+      "normalized_chars": 2110768,
+      "bytes": 6163442
+    },
+    {
+      "file": "18旧五代史.txt",
+      "normalized_chars": 835200,
+      "bytes": 2473027
+    },
+    {
+      "file": "19新五代史.txt",
+      "normalized_chars": 364360,
+      "bytes": 1066627
+    },
+    {
+      "file": "20宋史.txt",
+      "normalized_chars": 5001909,
+      "bytes": 14552016
+    },
+    {
+      "file": "21辽史.txt",
+      "normalized_chars": 360832,
+      "bytes": 1041742
+    },
+    {
+      "file": "22金史.txt",
+      "normalized_chars": 1150243,
+      "bytes": 3380472
+    },
+    {
+      "file": "23元史.txt",
+      "normalized_chars": 1939733,
+      "bytes": 5692124
+    },
+    {
+      "file": "24明史.txt",
+      "normalized_chars": 3434258,
+      "bytes": 10052774
+    },
+    {
+      "file": "附25新元史.txt",
+      "normalized_chars": 2027141,
+      "bytes": 5994888
+    },
+    {
+      "file": "附26清史稿.txt",
+      "normalized_chars": 5391829,
+      "bytes": 15830898
+    }
+  ]
+}
