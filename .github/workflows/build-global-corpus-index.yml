@@ -30,18 +30,52 @@ jobs:
       - name: Syntax gate
         run: python -m py_compile tools/global_corpus_index.py
 
-      - name: Fetch public 26 Histories corpus
+      - name: Fetch canonical 26 Histories corpus
         run: |
+          rm -rf external/ahua-dataset
           mkdir -p external
           git clone --depth 1 --filter=blob:none --sparse https://github.com/ahua/dataset.git external/ahua-dataset
           git -C external/ahua-dataset sparse-checkout set '26史'
+          # The upstream folder also contains derived files such as 史记freq.txt.
+          # They are not witnesses and must never enter the canonical corpus.
+          find external/ahua-dataset/26史 -maxdepth 1 -type f -name '*freq*.txt' -print -delete
           COUNT=$(find external/ahua-dataset/26史 -maxdepth 1 -type f -name '*.txt' | wc -l)
-          echo "26 Histories txt files: $COUNT"
-          test "$COUNT" -ge 26
+          echo "Canonical 26 Histories txt files: $COUNT"
+          test "$COUNT" -eq 26
+
+      - name: Corpus integrity gate
+        run: |
+          mkdir -p global_index_output/26histories
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          root = Path('external/ahua-dataset/26史')
+          files = sorted(root.glob('*.txt'))
+          def normalize(s):
+              return s.replace('\ufeff','').replace('\r\n','\n').replace('\r','\n')
+          rows=[]
+          total=0
+          for p in files:
+              text=normalize(p.read_text(encoding='utf-8', errors='replace'))
+              n=len(text)
+              total += n
+              rows.append({'file':p.name,'normalized_chars':n,'bytes':p.stat().st_size})
+          result={
+              'canonical_file_count':len(files),
+              'normalized_source_character_count':total,
+              'expected_normalized_source_character_count':36_871_518,
+              'exact_match': total == 36_871_518,
+              'files':rows,
+          }
+          Path('global_index_output/26histories/corpus_integrity.json').write_text(
+              json.dumps(result,ensure_ascii=False,indent=2),encoding='utf-8')
+          print(json.dumps({k:v for k,v in result.items() if k!='files'},ensure_ascii=False))
+          assert len(files)==26, len(files)
+          assert total==36_871_518, total
+          PY
 
       - name: Build locator + lexical + entity occurrence index
         run: |
-          rm -rf global_index_output/26histories
           python tools/global_corpus_index.py \
             --mode txt \
             --input external/ahua-dataset/26史 \
@@ -58,7 +92,10 @@ jobs:
           from pathlib import Path
           root = Path('global_index_output/26histories')
           m = json.loads((root/'manifest.json').read_text(encoding='utf-8'))
-          assert m['file_count'] >= 26, m
+          integrity = json.loads((root/'corpus_integrity.json').read_text(encoding='utf-8'))
+          assert m['file_count'] == 26, m
+          assert integrity['exact_match'] is True, integrity
+          assert integrity['normalized_source_character_count'] == 36_871_518, integrity
           assert m['unit_count'] > 0, m
           assert m['character_count'] > 30_000_000, m
           assert m['raw_corpus_mutated'] is False, m
@@ -69,7 +106,13 @@ jobs:
           assert docs == fts == m['unit_count'], (docs, fts, m['unit_count'])
           assert (root/'query_smoke.csv').stat().st_size > 100
           assert (root/'entity_occurrences.csv').stat().st_size > 100
-          print({'files':m['file_count'],'units':m['unit_count'],'chars':m['character_count'],'entity_occ':m['entity_occurrence_count']})
+          print({
+              'files':m['file_count'],
+              'normalized_source_chars':integrity['normalized_source_character_count'],
+              'indexed_content_chars':m['character_count'],
+              'units':m['unit_count'],
+              'entity_occ':m['entity_occurrence_count'],
+          })
           PY
 
       - name: Upload reusable index artifact
@@ -82,6 +125,7 @@ jobs:
       - name: Persist small durable index manifests on analysis branch
         run: |
           mkdir -p artifacts/global_corpus_index/26histories
+          cp global_index_output/26histories/corpus_integrity.json artifacts/global_corpus_index/26histories/
           cp global_index_output/26histories/manifest.json artifacts/global_corpus_index/26histories/
           cp global_index_output/26histories/source_manifest.csv artifacts/global_corpus_index/26histories/
           cp global_index_output/26histories/entity_occurrences.csv artifacts/global_corpus_index/26histories/
