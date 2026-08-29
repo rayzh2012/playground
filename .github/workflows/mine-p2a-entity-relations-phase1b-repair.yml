@@ -1,0 +1,71 @@
+name: Repair P2A Entity Relations Phase 1B
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - .github/workflows/mine-p2a-entity-relations-phase1b-repair.yml
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  audit-repair:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      GH_TOKEN: ${{ github.token }}
+      SOURCE_ARTIFACT_ID: '9707827019'
+      SOURCE_RUN_ID: '33228804380'
+      SOURCE_SIZE: '4381625928'
+      SOURCE_SHA256: '84581c47f1b3fcb29f3a311b28b29cfdb36d2b84ba538507e54daf4445fa6a4b'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: master
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: python -m pip install --disable-pip-version-check 'pyarrow>=23,<24'
+      - name: Download and verify canonical P2A artifact
+        run: |
+          set -euo pipefail
+          gh api --method GET -H 'Accept: application/vnd.github+json' \
+            "/repos/${GITHUB_REPOSITORY}/actions/artifacts/${SOURCE_ARTIFACT_ID}/zip" > p2a-final.zip
+          test "$(stat -c%s p2a-final.zip)" = "$SOURCE_SIZE"
+          echo "$SOURCE_SHA256  p2a-final.zip" | sha256sum -c -
+          mkdir -p index && unzip -q p2a-final.zip -d index
+      - name: Reuse semantic audit body
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('.github/workflows/mine-p2a-entity-relations-phase1b.yml')
+          t=p.read_text(encoding='utf-8')
+          sec=t.split('      - name: Semantic cue audit\n',1)[1].split('      - name: Gate\n',1)[0]
+          start=sec.index("          python - <<'PY'\n") + len("          python - <<'PY'\n")
+          end=sec.index('\n          PY', start)
+          body=sec[start:end]
+          body='\n'.join(line[10:] if line.startswith('          ') else line for line in body.splitlines())
+          Path('/tmp/relation_audit.py').write_text(body,encoding='utf-8')
+          PY
+          mkdir -p relation_out
+          python /tmp/relation_audit.py
+      - name: Correct 29-cue gate
+        run: |
+          python - <<'PY'
+          import csv,json
+          from pathlib import Path
+          m=json.loads(Path('relation_out/manifest.json').read_text(encoding='utf-8'))
+          r=list(csv.DictReader(Path('relation_out/cue_summary.csv').open(encoding='utf-8-sig')))
+          assert m['view']=='RESEARCH_OCCURRENCE'
+          assert len(r)==29, len(r)
+          assert {'蚩尤','帝鸿','帝鸿氏','黄帝氏'}=={x['alias'] for x in r}
+          print({'cues':len(r),'gate':'PASS'})
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: p2a-entity-relation-audit-phase1b
+          path: relation_out/
+          retention-days: 90
