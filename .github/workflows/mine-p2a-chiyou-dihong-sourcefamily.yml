@@ -24,7 +24,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      - run: python -m pip install --disable-pip-version-check 'pyarrow>=23,<24'
+      - run: python -m pip install --disable-pip-version-check 'pyarrow>=23,<24' 'pandas>=2,<3'
       - name: Download compact research slice
         run: |
           set -euo pipefail
@@ -35,7 +35,7 @@ jobs:
           test -f slice/by_alias/蚩尤.parquet
           test -f slice/slice_manifest.json
           python - <<'PY'
-          import json,os
+          import json
           from pathlib import Path
           m=json.loads(Path('slice/slice_manifest.json').read_text(encoding='utf-8'))
           assert m['source_artifact_id']==9707827019
@@ -48,7 +48,7 @@ jobs:
           python - <<'PY'
           import csv,json,re,unicodedata
           from pathlib import Path
-          from collections import Counter,defaultdict
+          from collections import Counter
           import pyarrow.parquet as pq
 
           df=pq.read_table('slice/by_alias/蚩尤.parquet').to_pandas()
@@ -83,21 +83,18 @@ jobs:
               for f in FAMILIES:
                   x=g[g['families'].map(lambda z:f in z)]
                   family_rows.append({'corpus':CORP.get(cid,cid),'family':f,'hits':len(x),'distinct_rows':len(x[['source_path','row_no']].drop_duplicates()),'unique_contexts':x['context'].nunique(),'normalized_unique_contexts':x['norm_context'].nunique(),'share_of_pair_hits':round(len(x)/max(1,len(g)),8)})
-          # pairwise other entities
           ents=['黄帝','黄帝氏','炎帝','赤帝','神农','九黎','涿鹿','阪泉','帝俊','白民','帝江','混敦','浑敦','缙云氏','少昊','颛顼','有熊氏']
           companions=[]
           for cid,g in pair.groupby('corpus_id'):
               for e in ents:
                   n=g['context'].str.contains(e,regex=False).sum()
                   companions.append({'corpus':CORP.get(cid,cid),'entity':e,'hits':int(n),'share':round(int(n)/max(1,len(g)),8)})
-          # exact/normalized cluster concentration
           clusters=[]
           for cid,g in pair.groupby('corpus_id'):
               c=Counter(g['norm_context'])
               for ctx,n in c.most_common(100):
                   ex=g[g['norm_context']==ctx].iloc[0]
                   clusters.append({'corpus':CORP.get(cid,cid),'normalized_cluster_hits':n,'source_path':ex['source_path'],'row_no':ex['row_no'],'families':'|'.join(ex['families']),'context':ex['context']})
-          # deterministic one representative per distinct source row, max 150/corpus
           samples=[]
           for cid,g in pair.sort_values(['source_path','row_no','match_start']).groupby('corpus_id'):
               seen=set()
