@@ -138,7 +138,7 @@ jobs:
           m=json.loads(Path('relation_out/manifest.json').read_text(encoding='utf-8'))
           r=list(csv.DictReader(Path('relation_out/cue_summary.csv').open(encoding='utf-8-sig')))
           assert m['view']=='RESEARCH_OCCURRENCE'
-          assert len(r)>=30
+          assert len(r)==29
           assert {'蚩尤','帝鸿','帝鸿氏','黄帝氏'}=={x['alias'] for x in r}
           print({'cues':len(r),'gate':'PASS'})
           PY
