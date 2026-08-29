@@ -1,0 +1,80 @@
+name: Build P2A Core Research Slice
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - .github/workflows/build-p2a-research-slice-core.yml
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      GH_TOKEN: ${{ github.token }}
+      SOURCE_ARTIFACT_ID: '9707827019'
+      SOURCE_RUN_ID: '33228804380'
+      SOURCE_SIZE: '4381625928'
+      SOURCE_SHA256: '84581c47f1b3fcb29f3a311b28b29cfdb36d2b84ba538507e54daf4445fa6a4b'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: global-corpus-index-v1
+      - name: Download and verify canonical P2A artifact
+        run: |
+          set -euo pipefail
+          gh api --method GET -H 'Accept: application/vnd.github+json' \
+            "/repos/${GITHUB_REPOSITORY}/actions/artifacts/${SOURCE_ARTIFACT_ID}/zip" > p2a-final.zip
+          test "$(stat -c%s p2a-final.zip)" = "$SOURCE_SIZE"
+          echo "$SOURCE_SHA256  p2a-final.zip" | sha256sum -c -
+          mkdir -p index
+          unzip -q p2a-final.zip -d index
+      - name: Build compact core slice
+        run: |
+          set -euo pipefail
+          mkdir -p slice/by_alias slice/control
+          for a in 蚩尤 帝鸿 帝鸿氏 黄帝氏; do
+            test -f "index/by_alias/${a}.parquet"
+            cp "index/by_alias/${a}.parquet" "slice/by_alias/${a}.parquet"
+          done
+          for f in manifest.json alias_precision_policy.tsv term_totals.csv research_term_totals.csv by_alias_index.csv; do
+            if [ -f "index/$f" ]; then cp "index/$f" "slice/control/$f"; fi
+          done
+          python - <<'PY'
+          import hashlib,json,os
+          from pathlib import Path
+          root=Path('slice')
+          files=[]
+          for p in sorted(root.rglob('*')):
+              if p.is_file():
+                  b=p.read_bytes()
+                  files.append({'path':str(p.relative_to(root)),'size_bytes':len(b),'sha256':hashlib.sha256(b).hexdigest()})
+          aliases=['蚩尤','帝鸿','帝鸿氏','黄帝氏']
+          m={'schema_version':'P2A-CORE-RESEARCH-SLICE-1.0','source_run_id':int(os.environ['SOURCE_RUN_ID']),'source_artifact_id':int(os.environ['SOURCE_ARTIFACT_ID']),'source_artifact_sha256':os.environ['SOURCE_SHA256'],'view_policy':'parquets preserve canonical hard_false_positive field; downstream default must filter hard_false_positive=false','aliases':aliases,'files':files,'total_size_bytes':sum(x['size_bytes'] for x in files),'warning':'Derivative research slice only. It is not universal fulltext and does not replace the canonical P2A artifact.'}
+          (root/'slice_manifest.json').write_text(json.dumps(m,ensure_ascii=False,indent=2),encoding='utf-8')
+          print(json.dumps(m,ensure_ascii=False,indent=2))
+          PY
+          (cd slice && find . -type f -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS.txt)
+      - name: Gate
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          m=json.loads(Path('slice/slice_manifest.json').read_text(encoding='utf-8'))
+          assert m['source_artifact_id']==9707827019
+          assert m['aliases']==['蚩尤','帝鸿','帝鸿氏','黄帝氏']
+          for a in m['aliases']:
+              assert Path(f'slice/by_alias/{a}.parquet').exists()
+          assert m['total_size_bytes']>0
+          print({'gate':'PASS','aliases':m['aliases'],'total_size_bytes':m['total_size_bytes']})
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: p2a-core-research-slice
+          path: slice/
+          retention-days: 90
