@@ -1,0 +1,116 @@
+name: Mine ChiYou Associations
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - .github/workflows/mine-chiyou-associations.yml
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  associate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      GH_TOKEN: ${{ github.token }}
+      SOURCE_ARTIFACT_ID: '9707827019'
+      SOURCE_SIZE: '4381625928'
+      SOURCE_SHA256: '84581c47f1b3fcb29f3a311b28b29cfdb36d2b84ba538507e54daf4445fa6a4b'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: global-corpus-index-v1
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: python -m pip install --disable-pip-version-check 'pyarrow>=23,<24'
+      - name: Download canonical P2A index
+        run: |
+          set -euo pipefail
+          gh api --method GET -H 'Accept: application/vnd.github+json' \
+            "/repos/${GITHUB_REPOSITORY}/actions/artifacts/${SOURCE_ARTIFACT_ID}/zip" > p2a-final.zip
+          test "$(stat -c%s p2a-final.zip)" = "$SOURCE_SIZE"
+          echo "$SOURCE_SHA256  p2a-final.zip" | sha256sum -c -
+          mkdir index && unzip -q p2a-final.zip -d index
+      - name: Exact locator-row association ranking
+        run: |
+          mkdir -p out
+          python - <<'PY'
+          import csv, json, math
+          from pathlib import Path
+          from collections import defaultdict
+          import pyarrow.dataset as ds
+
+          ROOT=Path('index'); OUT=Path('out')
+          idx=list(csv.DictReader((ROOT/'by_alias_index.csv').open(encoding='utf-8-sig')))
+          aliases=[r['alias'] for r in idx]
+          summary=list(csv.DictReader((ROOT/'shard_summary.csv').open(encoding='utf-8-sig')))
+          total_rows=defaultdict(int)
+          for r in summary: total_rows[r['corpus_id']]+=int(r['rows'])
+
+          def safe(a):
+              bad='\\/:*?"<>|\x00\n\r\t'; n=''.join('_' if c in bad else c for c in a).strip('. ')
+              return (n or 'EMPTY')+'.parquet'
+          def rowsets(alias):
+              t=ds.dataset(ROOT/'by_alias'/safe(alias),format='parquet').to_table(columns=['corpus_id','source_path','row_no','hard_false_positive'])
+              out=defaultdict(set)
+              for r in t.to_pylist():
+                  if bool(r.get('hard_false_positive',False)): continue
+                  out[r['corpus_id']].add((r['source_path'],r['row_no']))
+              return out
+
+          target='蚩尤'; chi=rowsets(target)
+          rows=[]
+          for alias in aliases:
+              if alias==target: continue
+              other=rowsets(alias)
+              rec={'target':target,'associate':alias}
+              combined_shared=combined_chi=combined_other=combined_universe=0
+              for cid,label in [('GCI-HOLD-0001','literature'),('GCI-HOLD-0002','cwt')]:
+                  A=chi.get(cid,set()); B=other.get(cid,set()); I=A&B
+                  a=len(A); b=len(B); i=len(I); u=total_rows[cid]
+                  rec[f'{label}_shared_rows']=i
+                  rec[f'{label}_p_assoc_given_chiyou']=i/a if a else 0
+                  rec[f'{label}_p_chiyou_given_assoc']=i/b if b else 0
+                  rec[f'{label}_jaccard']=i/(a+b-i) if (a+b-i) else 0
+                  rec[f'{label}_cosine']=i/math.sqrt(a*b) if a and b else 0
+                  prev=b/u if u else 0
+                  rec[f'{label}_lift']=((i/a)/prev) if a and prev else 0
+                  combined_shared+=i; combined_chi+=a; combined_other+=b; combined_universe+=u
+              i=combined_shared; a=combined_chi; b=combined_other
+              rec['shared_rows']=i
+              rec['p_assoc_given_chiyou']=i/a if a else 0
+              rec['p_chiyou_given_assoc']=i/b if b else 0
+              rec['jaccard']=i/(a+b-i) if (a+b-i) else 0
+              rec['cosine']=i/math.sqrt(a*b) if a and b else 0
+              rows.append(rec)
+
+          rows.sort(key=lambda r:(r['shared_rows'],r['cosine']),reverse=True)
+          with (OUT/'chiyou_associations.csv').open('w',encoding='utf-8-sig',newline='') as f:
+              w=csv.DictWriter(f,fieldnames=list(rows[0])); w.writeheader(); w.writerows(rows)
+          (OUT/'top20.json').write_text(json.dumps(rows[:20],ensure_ascii=False,indent=2),encoding='utf-8')
+          manifest={'schema_version':'P2A-CHIYOU-ASSOC-1.0','target':target,'view':'RESEARCH_OCCURRENCE','association_unit':'exact corpus_id+source_path+row_no intersection','alias_count_compared':len(rows),'warning':'Association measures textual neighborhood, not historical identity or causation.'}
+          (OUT/'manifest.json').write_text(json.dumps(manifest,ensure_ascii=False,indent=2),encoding='utf-8')
+          print(json.dumps(rows[:20],ensure_ascii=False,indent=2))
+          PY
+      - name: Gate
+        run: |
+          python - <<'PY'
+          import csv,json
+          from pathlib import Path
+          m=json.loads((Path('out')/'manifest.json').read_text(encoding='utf-8'))
+          r=list(csv.DictReader((Path('out')/'chiyou_associations.csv').open(encoding='utf-8-sig')))
+          assert m['target']=='蚩尤'
+          assert len(r)==33, len(r)
+          assert all(int(float(x['shared_rows']))>=0 for x in r)
+          print({'comparisons':len(r),'gate':'PASS'})
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: p2a-chiyou-associations
+          path: out/
+          retention-days: 90
