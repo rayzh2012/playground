@@ -42,7 +42,7 @@ jobs:
       - name: Acceptance
         run: |
           python - <<'PY'
-          import json,csv
+          import json
           from pathlib import Path
           import pyarrow.parquet as pq
           m=json.loads(Path('merged/manifest.json').read_text(encoding='utf-8'))
@@ -57,4 +57,18 @@ jobs:
           q=pq.read_table('merged/research_occurrences.parquet').to_pylist()
           assert len(q)==1 and '不周山' in q[0]['context'],q
           print(m)
+          PY
+      - name: Query behavior gate
+        run: |
+          python tools/query_registry_index.py --index-root merged --alias 共工 --limit 10 > research.jsonl
+          python tools/query_registry_index.py --index-root merged --alias 共工 --include-hard-false-positives --limit 10 > raw.jsonl
+          python - <<'PY'
+          import json
+          research=[json.loads(x) for x in open('research.jsonl',encoding='utf-8') if x.strip()]
+          raw=[json.loads(x) for x in open('raw.jsonl',encoding='utf-8') if x.strip()]
+          assert len(research)==1,research
+          assert '不周山' in research[0]['context'],research
+          assert len(raw)==2,raw
+          assert any('公共工程' in r['context'] for r in raw),raw
+          print({'research':len(research),'raw':len(raw)})
           PY
