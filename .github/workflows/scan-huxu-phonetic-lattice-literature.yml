@@ -1,0 +1,188 @@
+name: Huxu Phonetic Lattice Literature Delta
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - .github/workflows/scan-huxu-phonetic-lattice-literature.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      batches: ${{ steps.plan.outputs.batches }}
+    steps:
+      - id: plan
+        shell: bash
+        run: |
+          python - <<'PY' >> "$GITHUB_OUTPUT"
+          import json
+          out=[]
+          s=1
+          while s<=233:
+              e=min(233,s+4)
+              out.append({'start':s,'end':e,'count':e-s+1})
+              s=e+1
+          print('batches='+json.dumps(out,separators=(',',':')))
+          PY
+
+  scan:
+    needs: plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      max-parallel: 8
+      matrix:
+        batch: ${{ fromJSON(needs.plan.outputs.batches) }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: global-corpus-index-v1
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install dependencies
+        run: python -m pip install --disable-pip-version-check 'huggingface_hub[hf_xet]' 'pyarrow>=23,<24' pyahocorasick
+      - name: Build isolated Huxu lattice registry
+        run: |
+          mkdir -p huxu_delta
+          python - <<'PY'
+          import csv,itertools,json
+          from pathlib import Path
+          first_strict=['赫','嚇','爀','茖','格','骼','觡','蛒','敋','客','喀','揢','鉻','鵅','挌']
+          first_broad=['郝','赤','烾','螫','赥','捇','焃','浾','各','胳','閣','擱','恪','愙','洛','雒','絡','駱','酪','珞','烙']
+          second_strict=['胥','疋','稰','楈','諝','湑','揟','醑','糈','蘇','苏']
+          second_broad=['楚','礎','础','濋','儊','綀','疎','疏','蔬','梳']
+          rows=[]
+          for a,b in itertools.product(first_strict+first_broad,second_strict+second_broad):
+              tier=('STRICT' if a in first_strict else 'BROAD')+'x'+('STRICT' if b in second_strict else 'BROAD')
+              rows.append({'canonical_entity':'HUXU_PHONETIC_LATTICE','alias':a+b,'entity_type':'PHONETIC_LATTICE_CANDIDATE','notes':tier})
+          p=Path('huxu_delta/huxu_lattice_registry.tsv')
+          with p.open('w',encoding='utf-8-sig',newline='') as f:
+              w=csv.DictWriter(f,fieldnames=['canonical_entity','alias','entity_type','notes'],delimiter='\t')
+              w.writeheader(); w.writerows(rows)
+          Path('huxu_delta/lattice_manifest.json').write_text(json.dumps({
+              'first_strict':first_strict,'first_broad':first_broad,
+              'second_strict':second_strict,'second_broad':second_broad,
+              'alias_count':len(rows),'contract':'candidate generation only; occurrence does not imply identity or geography'
+          },ensure_ascii=False,indent=2),encoding='utf-8')
+          print('aliases',len(rows))
+          PY
+      - name: Scan Literature batch
+        run: |
+          OUT="batch_output/literature_${{ matrix.batch.start }}_${{ matrix.batch.end }}"
+          python tools/scan_registry_parquet_batch.py \
+            --corpus literature \
+            --start '${{ matrix.batch.start }}' \
+            --end '${{ matrix.batch.end }}' \
+            --registry huxu_delta/huxu_lattice_registry.tsv \
+            --context 120 \
+            --out "$OUT"
+      - name: Batch acceptance
+        env:
+          EXPECTED_SHARDS: ${{ matrix.batch.count }}
+        run: |
+          python - <<'PY'
+          import json,os
+          from pathlib import Path
+          root=Path("batch_output/literature_${{ matrix.batch.start }}_${{ matrix.batch.end }}")
+          m=json.loads((root/'manifest.json').read_text(encoding='utf-8'))
+          assert m['shard_count']==int(os.environ['EXPECTED_SHARDS']),m
+          assert m['registry_alias_count']==756,m
+          assert m['raw_mutated'] is False,m
+          assert (root/'occurrences.parquet').exists(),m
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: huxu-lit-${{ matrix.batch.start }}-${{ matrix.batch.end }}
+          path: batch_output/literature_${{ matrix.batch.start }}_${{ matrix.batch.end }}/
+          retention-days: 30
+          compression-level: 0
+
+  merge:
+    needs: scan
+    if: ${{ always() && needs.scan.result == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: global-corpus-index-v1
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install merge dependency
+        run: python -m pip install --disable-pip-version-check 'pyarrow>=23,<24'
+      - name: Rebuild lattice manifest and registry
+        run: |
+          mkdir -p huxu_delta
+          python - <<'PY'
+          import csv,itertools,json
+          from pathlib import Path
+          fs=['赫','嚇','爀','茖','格','骼','觡','蛒','敋','客','喀','揢','鉻','鵅','挌']; fb=['郝','赤','烾','螫','赥','捇','焃','浾','各','胳','閣','擱','恪','愙','洛','雒','絡','駱','酪','珞','烙']
+          ss=['胥','疋','稰','楈','諝','湑','揟','醑','糈','蘇','苏']; sb=['楚','礎','础','濋','儊','綀','疎','疏','蔬','梳']
+          rows=[]
+          for a,b in itertools.product(fs+fb,ss+sb):
+              tier=('STRICT' if a in fs else 'BROAD')+'x'+('STRICT' if b in ss else 'BROAD')
+              rows.append({'canonical_entity':'HUXU_PHONETIC_LATTICE','alias':a+b,'entity_type':'PHONETIC_LATTICE_CANDIDATE','notes':tier})
+          with Path('huxu_delta/huxu_lattice_registry.tsv').open('w',encoding='utf-8-sig',newline='') as f:
+              w=csv.DictWriter(f,fieldnames=['canonical_entity','alias','entity_type','notes'],delimiter='\t'); w.writeheader(); w.writerows(rows)
+          Path('huxu_delta/lattice_manifest.json').write_text(json.dumps({'first_strict':fs,'first_broad':fb,'second_strict':ss,'second_broad':sb,'alias_count':len(rows)},ensure_ascii=False,indent=2),encoding='utf-8')
+          PY
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: huxu-lit-*
+          path: batch_results
+      - name: Merge literature delta
+        run: |
+          python tools/merge_registry_scan.py --input-root batch_results --out merged --expected-shards 233
+      - name: Build ranked and geography-filtered views
+        run: |
+          python - <<'PY'
+          import csv,json
+          from pathlib import Path
+          import pyarrow.parquet as pq
+          reg={}
+          with Path('huxu_delta/huxu_lattice_registry.tsv').open(encoding='utf-8-sig') as f:
+              for r in csv.DictReader(f,delimiter='\t'): reg[r['alias']]=r['notes']
+          totals={}
+          with Path('merged/term_totals.csv').open(encoding='utf-8-sig') as f:
+              for r in csv.DictReader(f): totals[r['alias']]=totals.get(r['alias'],0)+int(r['raw_count'])
+          ranked=sorted(((a,c,reg.get(a,'')) for a,c in totals.items()),key=lambda x:(-x[1],x[0]))
+          with Path('merged/ranked_hits.csv').open('w',encoding='utf-8-sig',newline='') as f:
+              w=csv.writer(f); w.writerow(['alias','count','lattice_tier']); w.writerows(ranked)
+          regional=['章丘','臨濟','临济','朝陽','朝阳','濟南','济南','平陵','東平陵','东平陵','譚','谭','蒲姑','齊','齐','山東','山东','濟水','济水','百脈','百脉','楊緒','杨绪','土鼓','陽丘','阳丘','城子崖','龍山','龙山','北辛','後李','后李','焦家','小荊山','小荆山','繡江','绣江','淯河']
+          markers=['國','国','邑','城','山','水','河','郡','縣','县','氏','墓','都','里','鎮','镇','州']
+          pf=pq.ParquetFile('merged/registry_occurrences_raw.parquet')
+          reg_rows=[]; marker_rows=[]
+          for batch in pf.iter_batches(batch_size=65536):
+              for r in batch.to_pylist():
+                  ctx=r.get('context') or ''
+                  hit=[k for k in regional if k in ctx]
+                  if hit: reg_rows.append((r['alias'],reg.get(r['alias'],''),'|'.join(hit),r['corpus_id'],r['shard_ordinal'],r['source_path'],r['row_no'],r['match_start'],ctx))
+                  mh=[k for k in markers if k in ctx]
+                  if mh: marker_rows.append((r['alias'],reg.get(r['alias'],''),'|'.join(mh[:8]),r['corpus_id'],r['shard_ordinal'],r['source_path'],r['row_no'],r['match_start'],ctx))
+          fields=['alias','lattice_tier','filter_hits','corpus_id','shard_ordinal','source_path','row_no','match_start','context']
+          for fn,rows in [('shandong_context_hits.csv',reg_rows),('geo_marker_hits.csv',marker_rows)]:
+              with Path('merged',fn).open('w',encoding='utf-8-sig',newline='') as f:
+                  w=csv.writer(f); w.writerow(fields); w.writerows(rows)
+          Path('merged/huxu_delta_manifest.json').write_text(json.dumps({
+              'scope':'Literature-zh 233/233 only','candidate_aliases':756,
+              'contract':'exploratory delta; does not modify or supersede canonical 34-alias P2A baseline',
+              'regional_context_hit_rows':len(reg_rows),'generic_geo_marker_rows':len(marker_rows)
+          },ensure_ascii=False,indent=2),encoding='utf-8')
+          print('ranked aliases with hits',len(ranked),'regional rows',len(reg_rows),'marker rows',len(marker_rows))
+          PY
+      - name: Copy lattice provenance
+        run: cp huxu_delta/* merged/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: huxu-phonetic-lattice-literature-delta
+          path: merged/
+          retention-days: 90
+          compression-level: 0
