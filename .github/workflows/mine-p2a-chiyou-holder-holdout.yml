@@ -1,0 +1,189 @@
+name: Mine P2A Chiyou Holder Label Holdout
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - .github/workflows/mine-p2a-chiyou-holder-holdout.yml
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      GH_TOKEN: ${{ github.token }}
+      SOURCE_ARTIFACT_ID: '9707827019'
+      SOURCE_RUN_ID: '33228804380'
+      SOURCE_SIZE: '4381625928'
+      SOURCE_SHA256: '84581c47f1b3fcb29f3a311b28b29cfdb36d2b84ba538507e54daf4445fa6a4b'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: global-corpus-index-v1
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: python -m pip install --disable-pip-version-check 'pyarrow>=23,<24'
+      - name: Download and verify canonical P2A artifact
+        run: |
+          set -euo pipefail
+          gh api --method GET -H 'Accept: application/vnd.github+json' \
+            "/repos/${GITHUB_REPOSITORY}/actions/artifacts/${SOURCE_ARTIFACT_ID}/zip" > p2a-final.zip
+          test "$(stat -c%s p2a-final.zip)" = "$SOURCE_SIZE"
+          echo "$SOURCE_SHA256  p2a-final.zip" | sha256sum -c -
+          mkdir -p index
+          unzip -q p2a-final.zip -d index
+          test -f index/by_alias/蚩尤.parquet
+      - name: Run holder-label falsification audit
+        run: |
+          mkdir -p holdout_out
+          python - <<'PY'
+          from __future__ import annotations
+          import csv,json,re,os,itertools
+          from pathlib import Path
+          from collections import Counter,defaultdict
+          import pyarrow.dataset as ds
+
+          ROOT=Path('index'); OUT=Path('holdout_out')
+          rows=ds.dataset(ROOT/'by_alias'/'蚩尤.parquet',format='parquet').to_table().to_pylist()
+          rows=[r for r in rows if not bool(r.get('hard_false_positive',False))]
+          CORP={'GCI-HOLD-0001':'Literature-zh','GCI-HOLD-0002':'ChineseWebText2.0-HQ'}
+
+          CUES={
+            'CONFLICT_REBELLION':[
+              r'蚩尤.{0,45}(作乱|叛|反|逆|攻伐|攻|伐|战|争|逐帝|驱逐|赶走)',
+              r'(作乱|叛|反|逆|攻伐|攻|伐|战|争|逐帝|驱逐|赶走).{0,45}蚩尤'],
+            'YANDI_DESCENDANT':[
+              r'蚩尤.{0,35}炎帝.{0,10}(之后|后裔|苗裔|之裔|后)',
+              r'炎帝.{0,25}(之后|后裔|苗裔|之裔).{0,35}蚩尤',r'蚩尤姜姓.{0,25}炎帝'],
+            'SHENNONG_DESCENDANT':[
+              r'蚩尤.{0,35}神农.{0,10}(之后|后裔|苗裔|之裔|后)',
+              r'神农.{0,25}(之后|后裔|苗裔|之裔).{0,35}蚩尤'],
+            'SUBORDINATE_MINISTER':[
+              r'蚩尤.{0,25}(神农|炎帝).{0,12}(臣|属|部下|将)',
+              r'(神农|炎帝).{0,25}(臣|属|部下|将).{0,25}蚩尤',r'命蚩尤',r'蚩尤.{0,12}受命'],
+            'YANDI_TITLE_CLAIM':[
+              r'蚩尤.{0,35}(自号|号|自称|称|继号).{0,12}炎帝',
+              r'蚩尤.{0,35}炎帝之号',r'以.{0,12}炎帝.{0,12}(名义|之名).{0,35}蚩尤'],
+            'CHIYOU_EQ_YANDI':[
+              r'蚩尤.{0,25}(即|就是|乃|为|亦即).{0,18}炎帝',
+              r'炎帝.{0,25}(即|就是|乃|为|亦即).{0,18}蚩尤'],
+            'NAMING_LABEL_GRAMMAR':[
+              r'(名曰|号曰|称为|称作|谓之|名为|号为).{0,10}蚩尤',
+              r'蚩尤.{0,10}(之名|之号|称号|名号|本名|原名|蔑称|贬称|称谓)'],
+            'GROUP_POLITY_GRAMMAR':[
+              r'蚩尤(氏|族|部族|部落|集团|国)',r'蚩尤.{0,8}(九黎|部众|族人|族众|部下)'],
+            'PLURAL_BROTHER_TRADITION':[
+              r'蚩尤.{0,30}(兄弟|八十一人|七十二人|八十一个|七十二个)',
+              r'(兄弟|八十一人|七十二人).{0,30}蚩尤'],
+            'WAR_GOD_OFFICE':[
+              r'蚩尤.{0,40}(兵主|主兵|军神|战神|兵神)',
+              r'(兵主|主兵|军神|战神|兵神).{0,40}蚩尤'],
+          }
+          regs={k:[re.compile(p) for p in ps] for k,ps in CUES.items()}
+          MARKERS={
+            'YIZHOUSHU_CHANGMAI':[r'逸周书.{0,8}尝麦',r'尝麦篇?',r'《尝麦》'],
+            'SHIJI_WUDI':[r'史记.{0,8}五帝本纪',r'《五帝本纪》'],
+            'SHANHAIJING':[r'山海经'],
+            'SHIBEN':[r'世本'],
+            'LUSHI':[r'路史'],
+            'LONGYU_HETU':[r'龙鱼河图'],
+            'TAIPING_YULAN':[r'太平御览'],
+            'YUFANG_YAOLAN':[r'艺文类聚'],
+          }
+          mregs={k:[re.compile(p) for p in ps] for k,ps in MARKERS.items()}
+
+          def hit(ctx,rs): return any(rx.search(ctx) for rx in rs)
+          flags=[]
+          class_summary=[]
+          for i,r in enumerate(rows):
+              ctx=r.get('context') or ''
+              hs={k for k,rs in regs.items() if hit(ctx,rs)}
+              ms={k for k,rs in mregs.items() if hit(ctx,rs)}
+              flags.append((r,ctx,hs,ms))
+
+          denom=len(rows)
+          for k in CUES:
+              xs=[x for x in flags if k in x[2]]
+              by=Counter(x[0].get('corpus_id') for x in xs)
+              drows={(x[0].get('corpus_id'),x[0].get('source_path'),x[0].get('row_no')) for x in xs}
+              uctx={x[1] for x in xs}
+              class_summary.append({'class':k,'hits':len(xs),'distinct_rows':len(drows),'unique_contexts':len(uctx),
+                'literature_hits':by.get('GCI-HOLD-0001',0),'cwt_hits':by.get('GCI-HOLD-0002',0),
+                'share_of_chiyou_occurrences':round(len(xs)/max(1,denom),8)})
+
+          overlaps=[]
+          keys=list(CUES)
+          for a,b in itertools.combinations(keys,2):
+              xs=[x for x in flags if a in x[2] and b in x[2]]
+              if not xs: continue
+              drows={(x[0].get('corpus_id'),x[0].get('source_path'),x[0].get('row_no')) for x in xs}
+              uctx={x[1] for x in xs}
+              overlaps.append({'class_a':a,'class_b':b,'hits':len(xs),'distinct_rows':len(drows),'unique_contexts':len(uctx)})
+
+          marker_summary=[]
+          for cls in CUES:
+              base=[x for x in flags if cls in x[2]]
+              for marker in MARKERS:
+                  xs=[x for x in base if marker in x[3]]
+                  if not xs: continue
+                  drows={(x[0].get('corpus_id'),x[0].get('source_path'),x[0].get('row_no')) for x in xs}
+                  marker_summary.append({'class':cls,'source_marker':marker,'hits':len(xs),'distinct_rows':len(drows),
+                    'share_within_class':round(len(xs)/max(1,len(base)),8)})
+
+          # Exact-deduplicated samples by corpus, including unclassified holdout.
+          samples=[]
+          for cls in list(CUES)+['UNCLASSIFIED']:
+              cand=[x for x in flags if (cls=='UNCLASSIFIED' and not x[2]) or (cls!='UNCLASSIFIED' and cls in x[2])]
+              seen=set(); per=Counter()
+              for r,ctx,hs,ms in cand:
+                  corpus=r.get('corpus_id'); key=(corpus,ctx)
+                  if key in seen or per[corpus]>=30: continue
+                  seen.add(key); per[corpus]+=1
+                  samples.append({'class':cls,'corpus':CORP.get(corpus,corpus),'corpus_id':corpus,
+                    'source_path':r.get('source_path'),'shard_ordinal':r.get('shard_ordinal'),'row_no':r.get('row_no'),
+                    'match_start':r.get('match_start'),'match_end':r.get('match_end'),
+                    'other_classes':sorted(hs-{cls}),'source_markers':sorted(ms),'context':ctx})
+
+          def write_csv(name, data):
+              p=OUT/name
+              if not data: p.write_text('',encoding='utf-8'); return
+              with p.open('w',encoding='utf-8-sig',newline='') as f:
+                  w=csv.DictWriter(f,fieldnames=list(data[0].keys())); w.writeheader(); w.writerows(data)
+          write_csv('class_summary.csv',class_summary)
+          write_csv('class_overlap.csv',sorted(overlaps,key=lambda x:x['hits'],reverse=True))
+          write_csv('source_marker_summary.csv',sorted(marker_summary,key=lambda x:x['hits'],reverse=True))
+          with (OUT/'samples.jsonl').open('w',encoding='utf-8') as f:
+              for x in samples: f.write(json.dumps(x,ensure_ascii=False)+'\n')
+          classified=sum(1 for x in flags if x[2])
+          manifest={'schema_version':'P2A-CHIYOU-HOLDER-HOLDOUT-1.0','source_run_id':int(os.environ['SOURCE_RUN_ID']),
+            'source_artifact_id':int(os.environ['SOURCE_ARTIFACT_ID']),'source_sha256':os.environ['SOURCE_SHA256'],
+            'view':'RESEARCH_OCCURRENCE','chiyou_occurrences':denom,'classified_any':classified,
+            'unclassified':denom-classified,'cue_classes_nonexclusive':True,
+            'warning':'Regex classes and source markers are retrieval diagnostics, not historical truth. Source-marker counts can reflect later quotation/republication.'}
+          (OUT/'manifest.json').write_text(json.dumps(manifest,ensure_ascii=False,indent=2),encoding='utf-8')
+          print(json.dumps({'manifest':manifest,'class_summary':class_summary,'top_overlaps':sorted(overlaps,key=lambda x:x['hits'],reverse=True)[:20]},ensure_ascii=False,indent=2))
+          PY
+      - name: Gate
+        run: |
+          python - <<'PY'
+          import csv,json
+          from pathlib import Path
+          m=json.loads(Path('holdout_out/manifest.json').read_text(encoding='utf-8'))
+          c=list(csv.DictReader(Path('holdout_out/class_summary.csv').open(encoding='utf-8-sig')))
+          assert m['view']=='RESEARCH_OCCURRENCE'
+          assert m['chiyou_occurrences']==199119
+          assert len(c)==10
+          assert all(int(x['hits'])>=0 for x in c)
+          print({'classes':len(c),'chiyou_occurrences':m['chiyou_occurrences'],'gate':'PASS'})
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: p2a-chiyou-holder-holdout-phase1c
+          path: holdout_out/
+          retention-days: 90
