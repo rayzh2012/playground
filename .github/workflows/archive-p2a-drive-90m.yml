@@ -1,0 +1,156 @@
+name: Archive P2A Drive-Safe 90MiB Chunks
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - .github/workflows/archive-p2a-drive-90m.yml
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  split:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      GH_TOKEN: ${{ github.token }}
+      SOURCE_ARTIFACT_ID: '9707827019'
+      SOURCE_RUN_ID: '33228804380'
+      SOURCE_SIZE: '4381625928'
+      SOURCE_SHA256: '84581c47f1b3fcb29f3a311b28b29cfdb36d2b84ba538507e54daf4445fa6a4b'
+    steps:
+      - name: Download and verify exact final artifact
+        run: |
+          set -euo pipefail
+          gh api --method GET -H 'Accept: application/vnd.github+json' \
+            "/repos/${GITHUB_REPOSITORY}/actions/artifacts/${SOURCE_ARTIFACT_ID}/zip" > p2a-final.zip
+          test "$(stat -c%s p2a-final.zip)" = "$SOURCE_SIZE"
+          echo "$SOURCE_SHA256  p2a-final.zip" | sha256sum -c -
+
+      - name: Split to 90MiB raw chunks
+        run: |
+          set -euo pipefail
+          mkdir -p chunks manifest
+          split -b 90MiB -d -a 2 p2a-final.zip chunks/p2a-registry-final.zip.part-
+          COUNT=$(find chunks -type f | wc -l)
+          test "$COUNT" = '47'
+          sha256sum chunks/* > manifest/chunks.sha256
+          stat -c '%n,%s' chunks/* > manifest/chunks.csv
+          cat > manifest/source.json <<EOF
+          {
+            "schema_version": "P2A-DRIVE-SNAPSHOT-CHUNKS-1.1",
+            "source_repo": "${GITHUB_REPOSITORY}",
+            "source_run_id": ${SOURCE_RUN_ID},
+            "source_artifact_id": ${SOURCE_ARTIFACT_ID},
+            "source_artifact_name": "global-corpus-registry-occurrence-index",
+            "source_size_bytes": ${SOURCE_SIZE},
+            "source_sha256": "${SOURCE_SHA256}",
+            "chunk_size_policy": "90MiB",
+            "chunk_count": 47,
+            "transport_reason": "Google Drive connector external-file transfer ceiling 100MiB",
+            "reassembly": "cat p2a-registry-final.zip.part-* > global-corpus-registry-occurrence-index.zip"
+          }
+          EOF
+
+      - name: Upload Drive-safe chunk artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          # Use gh artifact upload REST via actions/upload-artifact dynamically is not available;
+          # emit matrix-free upload steps through a generated composite list is unsupported.
+          # Instead package each chunk with GitHub CLI artifact cache API is intentionally avoided.
+          echo 'Chunks prepared; subsequent explicit upload-artifact steps handle them.'
+
+      - name: Upload manifest
+        uses: actions/upload-artifact@v4
+        with:
+          name: p2a-drive90-manifest
+          path: manifest/
+          retention-days: 90
+          compression-level: 0
+      - name: Upload chunk 00-09
+        uses: actions/upload-artifact@v4
+        with:
+          name: p2a-drive90-chunks-00-09
+          path: |
+            chunks/p2a-registry-final.zip.part-00
+            chunks/p2a-registry-final.zip.part-01
+            chunks/p2a-registry-final.zip.part-02
+            chunks/p2a-registry-final.zip.part-03
+            chunks/p2a-registry-final.zip.part-04
+            chunks/p2a-registry-final.zip.part-05
+            chunks/p2a-registry-final.zip.part-06
+            chunks/p2a-registry-final.zip.part-07
+            chunks/p2a-registry-final.zip.part-08
+            chunks/p2a-registry-final.zip.part-09
+          retention-days: 90
+          compression-level: 0
+      - name: Upload chunk 10-19
+        uses: actions/upload-artifact@v4
+        with:
+          name: p2a-drive90-chunks-10-19
+          path: |
+            chunks/p2a-registry-final.zip.part-10
+            chunks/p2a-registry-final.zip.part-11
+            chunks/p2a-registry-final.zip.part-12
+            chunks/p2a-registry-final.zip.part-13
+            chunks/p2a-registry-final.zip.part-14
+            chunks/p2a-registry-final.zip.part-15
+            chunks/p2a-registry-final.zip.part-16
+            chunks/p2a-registry-final.zip.part-17
+            chunks/p2a-registry-final.zip.part-18
+            chunks/p2a-registry-final.zip.part-19
+          retention-days: 90
+          compression-level: 0
+      - name: Upload chunk 20-29
+        uses: actions/upload-artifact@v4
+        with:
+          name: p2a-drive90-chunks-20-29
+          path: |
+            chunks/p2a-registry-final.zip.part-20
+            chunks/p2a-registry-final.zip.part-21
+            chunks/p2a-registry-final.zip.part-22
+            chunks/p2a-registry-final.zip.part-23
+            chunks/p2a-registry-final.zip.part-24
+            chunks/p2a-registry-final.zip.part-25
+            chunks/p2a-registry-final.zip.part-26
+            chunks/p2a-registry-final.zip.part-27
+            chunks/p2a-registry-final.zip.part-28
+            chunks/p2a-registry-final.zip.part-29
+          retention-days: 90
+          compression-level: 0
+      - name: Upload chunk 30-39
+        uses: actions/upload-artifact@v4
+        with:
+          name: p2a-drive90-chunks-30-39
+          path: |
+            chunks/p2a-registry-final.zip.part-30
+            chunks/p2a-registry-final.zip.part-31
+            chunks/p2a-registry-final.zip.part-32
+            chunks/p2a-registry-final.zip.part-33
+            chunks/p2a-registry-final.zip.part-34
+            chunks/p2a-registry-final.zip.part-35
+            chunks/p2a-registry-final.zip.part-36
+            chunks/p2a-registry-final.zip.part-37
+            chunks/p2a-registry-final.zip.part-38
+            chunks/p2a-registry-final.zip.part-39
+          retention-days: 90
+          compression-level: 0
+      - name: Upload chunk 40-46
+        uses: actions/upload-artifact@v4
+        with:
+          name: p2a-drive90-chunks-40-46
+          path: |
+            chunks/p2a-registry-final.zip.part-40
+            chunks/p2a-registry-final.zip.part-41
+            chunks/p2a-registry-final.zip.part-42
+            chunks/p2a-registry-final.zip.part-43
+            chunks/p2a-registry-final.zip.part-44
+            chunks/p2a-registry-final.zip.part-45
+            chunks/p2a-registry-final.zip.part-46
+          retention-days: 90
+          compression-level: 0
