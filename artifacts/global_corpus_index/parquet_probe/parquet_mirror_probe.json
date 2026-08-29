@@ -1,0 +1,69 @@
+[
+  {
+    "corpus_id": "GCI-HOLD-0001",
+    "repo_id": "Geralt-Targaryen/Literature-zh",
+    "drive_basename": "literature_zh-00233-of-00233.parquet",
+    "source_suffix": "literature_zh-00233-of-00233.parquet",
+    "drive_file_id": "1rCZaQhYD0jYaFTEz4mMS_JcASLf_CraN",
+    "drive_size": 80314697,
+    "drive_sha256": "d452713dfc7fecf65e713541a5c85c2f772f51e46b5cd3d6bb34b0aff3b6693e",
+    "hf_source_path": "literature_zh-00233-of-00233.parquet",
+    "hf_download_size": 80314697,
+    "hf_sha256": "d452713dfc7fecf65e713541a5c85c2f772f51e46b5cd3d6bb34b0aff3b6693e",
+    "drive_mirror_byte_identical": true,
+    "parquet_rows": 9660,
+    "row_groups": 1,
+    "top_level_columns": [
+      "text"
+    ],
+    "schema": "text: string\n-- schema metadata --\npandas: '{\"index_columns\": [], \"column_indexes\": [], \"columns\": [{\"name\":' + 183",
+    "text_column": "text",
+    "pilot_term_counts": {
+      "蚩尤": 0,
+      "炎帝": 93,
+      "赤帝": 7,
+      "黄帝": 211,
+      "共工": 58,
+      "帝鸿": 1,
+      "少昊": 11,
+      "太昊": 17,
+      "颛顼": 0,
+      "九黎": 5
+    }
+  },
+  {
+    "corpus_id": "GCI-HOLD-0002",
+    "repo_id": "Morton-Li/ChineseWebText2.0-HighQuality",
+    "drive_basename": "data__CASIA-LM_ChineseWebText2.0_partial-001553.parquet",
+    "source_suffix": "partial-001553.parquet",
+    "drive_file_id": "1QOlPzxwZHkuf8S3GqY0MS1qgrjfGx8O6",
+    "drive_size": 252467982,
+    "drive_sha256": "3c32c7e566b7fd103b18bbdcb9d6e5c98f1ec3d0b9f8a7c1b0d2a973a8e871ef",
+    "hf_source_path": "data/CASIA-LM_ChineseWebText2.0_partial-001553.parquet",
+    "hf_download_size": 252467982,
+    "hf_sha256": "3c32c7e566b7fd103b18bbdcb9d6e5c98f1ec3d0b9f8a7c1b0d2a973a8e871ef",
+    "drive_mirror_byte_identical": true,
+    "parquet_rows": 100000,
+    "row_groups": 1,
+    "top_level_columns": [
+      "text",
+      "domain",
+      "toxicity",
+      "quality_score"
+    ],
+    "schema": "text: large_string\ndomain: struct<multi_label: list<element: string>, single_label: string>\n  child 0, multi_label: list<element: string>\n      child 0, element: string\n  child 1, single_label: string\ntoxicity: struct<label: int64, score: double>\n  child 0, label: int64\n  child 1, score: double\nquality_score: double\n-- schema metadata --\npandas: '{\"index_columns\": [], \"column_indexes\": [], \"columns\": [{\"name\":' + 550",
+    "text_column": "text",
+    "pilot_term_counts": {
+      "蚩尤": 72,
+      "炎帝": 86,
+      "赤帝": 14,
+      "黄帝": 453,
+      "共工": 165,
+      "帝鸿": 1,
+      "少昊": 25,
+      "太昊": 15,
+      "颛顼": 67,
+      "九黎": 10
+    }
+  }
+]
