@@ -1,0 +1,149 @@
+name: Mine P2A Entity Relations Phase 1B
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - .github/workflows/mine-p2a-entity-relations-phase1b.yml
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      GH_TOKEN: ${{ github.token }}
+      SOURCE_ARTIFACT_ID: '9707827019'
+      SOURCE_RUN_ID: '33228804380'
+      SOURCE_SIZE: '4381625928'
+      SOURCE_SHA256: '84581c47f1b3fcb29f3a311b28b29cfdb36d2b84ba538507e54daf4445fa6a4b'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: global-corpus-index-v1
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: python -m pip install --disable-pip-version-check 'pyarrow>=23,<24'
+      - name: Download and verify canonical P2A artifact
+        run: |
+          set -euo pipefail
+          gh api --method GET -H 'Accept: application/vnd.github+json' \
+            "/repos/${GITHUB_REPOSITORY}/actions/artifacts/${SOURCE_ARTIFACT_ID}/zip" > p2a-final.zip
+          test "$(stat -c%s p2a-final.zip)" = "$SOURCE_SIZE"
+          echo "$SOURCE_SHA256  p2a-final.zip" | sha256sum -c -
+          mkdir -p index
+          unzip -q p2a-final.zip -d index
+          test -d index/by_alias
+      - name: Semantic cue audit
+        run: |
+          mkdir -p relation_out
+          python - <<'PY'
+          from __future__ import annotations
+          import csv,json,re
+          from pathlib import Path
+          from collections import Counter
+          import pyarrow.dataset as ds
+
+          ROOT=Path('index'); OUT=Path('relation_out')
+          CORP={'GCI-HOLD-0001':'Literature-zh','GCI-HOLD-0002':'ChineseWebText2.0-HQ'}
+          def safe(a):
+              bad='\\/:*?"<>|\x00\n\r\t'; n=''.join('_' if c in bad else c for c in a).strip('. ')
+              return (n or 'EMPTY')+'.parquet'
+          def rows(alias):
+              t=ds.dataset(ROOT/'by_alias'/safe(alias),format='parquet').to_table()
+              return [r for r in t.to_pylist() if not bool(r.get('hard_false_positive',False))]
+
+          DATA={a:rows(a) for a in ['蚩尤','帝鸿','帝鸿氏','黄帝氏']}
+          CUES={
+            '蚩尤':{
+              'CHIDI_DIRECT_CLUSTER':[r'赤帝.{0,90}蚩尤|蚩尤.{0,90}赤帝',r'命赤帝.{0,120}命.{0,12}蚩尤',r'蚩尤乃逐帝'],
+              'CHIDI_TO_YANDI_GLOSS':[r'赤帝.{0,30}(即|就是|指|亦即|也就是).{0,20}炎帝',r'炎帝.{0,30}(即|就是|指|亦即|也就是).{0,20}赤帝'],
+              'CHIYOU_CLAIMS_YANDI':[r'(号|自号|称|自称|继号).{0,8}炎帝',r'以.{0,8}炎帝.{0,8}(名义|之名)',r'炎帝之号'],
+              'CHIYOU_YANDI_DESCENDANT':[r'蚩尤.{0,30}炎帝之后',r'蚩尤.{0,30}炎帝.{0,8}(后裔|苗裔|后)',r'炎帝.{0,20}(之后|后裔|苗裔).{0,30}蚩尤'],
+              'CHIYOU_SHENNONG_MINISTER':[r'蚩尤.{0,18}神农.{0,8}臣',r'蚩尤.{0,18}神农臣',r'神农.{0,12}(之)?臣.{0,18}蚩尤'],
+              'CHIYOU_EXPELS_DI':[r'蚩尤.{0,12}(乃)?逐帝',r'蚩尤.{0,30}(赶走|驱逐|逐).{0,12}炎帝',r'逐帝而居'],
+              'YANDI_CHIYOU_CONFLICT':[r'蚩尤.{0,40}(与|攻|伐|战|逐).{0,20}炎帝',r'炎帝.{0,40}(与|攻|伐|战|制|御).{0,20}蚩尤'],
+              'YANDI_HUANGDI_ALLIANCE_VS_CHIYOU':[r'炎帝.{0,60}黄帝.{0,40}(联合|合谋|联手|求救|说于).{0,80}蚩尤',r'炎帝.{0,50}(联合|联手|合谋|求救).{0,30}黄帝.{0,80}蚩尤'],
+              'LUSHI_DEPENDENCE':[r'《?路史',r'路史[·・]'],
+              'CHANGMAI_DEPENDENCE':[r'尝麦',r'逸周书.{0,8}尝麦'],
+            },
+            '帝鸿':{
+              'HUANGDI_EQUIVALENCE_CUE':[r'帝鸿.{0,24}(即|就是|乃|为|亦|又曰|又称|一说).{0,24}黄帝',r'黄帝.{0,24}(即|就是|乃|为|亦曰|又曰|又称|一说).{0,24}帝鸿',r'帝鸿，黄帝也'],
+              'DIJIANG_EQUIVALENCE_CUE':[r'帝江.{0,20}(即|就是|为|读如|同|亦).{0,20}帝鸿',r'帝鸿.{0,20}(即|就是|为|同|亦).{0,20}帝江',r'江读如鸿'],
+              'BAIMIN_DIRECT_LINE':[r'帝俊生帝鸿.{0,30}帝鸿生白民'],
+              'FOUR_EVILS_PARALLEL':[r'帝鸿氏.{0,180}(少昊氏|少皞氏|颛顼氏|高阳氏).{0,180}缙云氏',r'缙云氏.{0,180}帝鸿氏'],
+              'COMMENTARIAL_BRIDGE':[r'贾逵',r'杜预',r'张守节',r'正义',r'集解',r'索隐'],
+            },
+            '帝鸿氏':{
+              'HUANGDI_EQUIVALENCE_CUE':[r'帝鸿氏.{0,30}(即|就是|乃|为|一说).{0,30}黄帝',r'帝鸿，黄帝也',r'黄帝.{0,30}(又曰|又称|亦曰|一说).{0,30}帝鸿氏'],
+              'FOUR_EVILS_PARALLEL':[r'帝鸿氏.{0,220}(少昊氏|少皞氏|颛顼氏|高阳氏).{0,220}缙云氏',r'缙云氏.{0,220}帝鸿氏'],
+              'BAIMIN_DIRECT_LINE':[r'帝俊生帝鸿.{0,30}帝鸿生白民'],
+              'DIJIANG_EQUIVALENCE_CUE':[r'帝江.{0,20}(即|就是|为|读如|同|亦).{0,20}帝鸿',r'帝鸿.{0,20}(即|就是|为|同|亦).{0,20}帝江',r'江读如鸿'],
+              'COMMENTARIAL_BRIDGE':[r'贾逵',r'杜预',r'张守节',r'正义',r'集解',r'索隐'],
+            },
+            '黄帝氏':{
+              'YANDI_SHI_EXACT':[r'炎帝氏'],
+              'GONGGONG_SHI_EXACT':[r'共工氏'],
+              'TAIHAO_SHI_EXACT':[r'(太昊氏|太皞氏|大皞氏|大昊氏)'],
+              'SHAOHAO_SHI_EXACT':[r'(少昊氏|少皞氏)'],
+              'MULTI_XDI_SHI_PARALLEL':[r'黄帝氏.{0,180}炎帝氏.{0,180}共工氏|炎帝氏.{0,180}黄帝氏.{0,180}共工氏'],
+              'XUANYUAN_SHI_BRIDGE':[r'轩辕氏'],
+              'YOUXIONG_SHI_BRIDGE':[r'有熊氏'],
+              'DIHONG_BRIDGE':[r'帝鸿氏|帝鸿'],
+              'COMMENTARIAL_BRIDGE':[r'贾逵',r'杜预',r'张守节',r'正义',r'集解',r'索隐'],
+            }
+          }
+
+          summary=[]; sample=[]
+          for alias,cues in CUES.items():
+              rs=DATA[alias]; denom=len(rs)
+              for cue,patterns in cues.items():
+                  regs=[re.compile(p) for p in patterns]
+                  hits=[r for r in rs if any(rx.search(r.get('context') or '') for rx in regs)]
+                  by=Counter(r.get('corpus_id') for r in hits)
+                  drows={(r.get('corpus_id'),r.get('source_path'),r.get('row_no')) for r in hits}
+                  uctx=set((r.get('context') or '') for r in hits)
+                  summary.append({'alias':alias,'cue':cue,'hits':len(hits),'distinct_rows':len(drows),'unique_contexts':len(uctx),
+                                  'literature_hits':by.get('GCI-HOLD-0001',0),'cwt_hits':by.get('GCI-HOLD-0002',0),
+                                  'share_of_alias':round(len(hits)/max(1,denom),8)})
+                  seen=set(); per=Counter()
+                  for r in hits:
+                      ctx=r.get('context') or ''; corpus=r.get('corpus_id'); key=(corpus,ctx)
+                      if key in seen or per[corpus]>=15: continue
+                      seen.add(key); per[corpus]+=1
+                      sample.append({'alias':alias,'cue':cue,'corpus':CORP.get(corpus,corpus),'corpus_id':corpus,
+                                     'shard_ordinal':r.get('shard_ordinal'),'source_path':r.get('source_path'),'row_no':r.get('row_no'),
+                                     'context':ctx})
+
+          with (OUT/'cue_summary.csv').open('w',encoding='utf-8-sig',newline='') as f:
+              w=csv.DictWriter(f,fieldnames=list(summary[0])); w.writeheader(); w.writerows(summary)
+          with (OUT/'cue_samples.jsonl').open('w',encoding='utf-8') as f:
+              for r in sample: f.write(json.dumps(r,ensure_ascii=False)+'\n')
+          manifest={'schema_version':'P2A-ENTITY-RELATION-AUDIT-1.0','source_run_id':int(__import__('os').environ['SOURCE_RUN_ID']),
+                    'source_artifact_id':int(__import__('os').environ['SOURCE_ARTIFACT_ID']),'view':'RESEARCH_OCCURRENCE',
+                    'cue_sets_are_nonexclusive':True,'warning':'Regex cue counts are retrieval diagnostics, not historical truth. Read sampled contexts and source provenance before hypothesis updates.'}
+          (OUT/'manifest.json').write_text(json.dumps(manifest,ensure_ascii=False,indent=2),encoding='utf-8')
+          print(json.dumps(sorted(summary,key=lambda x:x['hits'],reverse=True),ensure_ascii=False,indent=2))
+          PY
+      - name: Gate
+        run: |
+          python - <<'PY'
+          import csv,json
+          from pathlib import Path
+          m=json.loads(Path('relation_out/manifest.json').read_text(encoding='utf-8'))
+          r=list(csv.DictReader(Path('relation_out/cue_summary.csv').open(encoding='utf-8-sig')))
+          assert m['view']=='RESEARCH_OCCURRENCE'
+          assert len(r)>=30
+          assert {'蚩尤','帝鸿','帝鸿氏','黄帝氏'}=={x['alias'] for x in r}
+          print({'cues':len(r),'gate':'PASS'})
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: p2a-entity-relation-audit-phase1b
+          path: relation_out/
+          retention-days: 90
