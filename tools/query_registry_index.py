@@ -24,6 +24,8 @@ def main():
     ap.add_argument('--shard-min',type=int)
     ap.add_argument('--shard-max',type=int)
     ap.add_argument('--contains',help='optional substring required in saved context')
+    ap.add_argument('--precision',choices=['HIGH','MEDIUM','LOW','UNCLASSIFIED'])
+    ap.add_argument('--include-hard-false-positives',action='store_true',help='return RAW lexical collisions too; default is research-safe view')
     ap.add_argument('--limit',type=int,default=100)
     ap.add_argument('--format',choices=['jsonl','csv'],default='jsonl')
     args=ap.parse_args()
@@ -36,12 +38,14 @@ def main():
     def AND(x):
         nonlocal filt
         filt=x if filt is None else filt & x
-    if args.corpus_id:
-        AND(ds.field('corpus_id')==args.corpus_id)
-    if args.shard_min is not None:
-        AND(ds.field('shard_ordinal')>=args.shard_min)
-    if args.shard_max is not None:
-        AND(ds.field('shard_ordinal')<=args.shard_max)
+    if args.corpus_id: AND(ds.field('corpus_id')==args.corpus_id)
+    if args.shard_min is not None: AND(ds.field('shard_ordinal')>=args.shard_min)
+    if args.shard_max is not None: AND(ds.field('shard_ordinal')<=args.shard_max)
+    names=set(dataset.schema.names)
+    if not args.include_hard_false_positives and 'hard_false_positive' in names:
+        AND(ds.field('hard_false_positive')==False)
+    if args.precision and 'retrieval_precision' in names:
+        AND(ds.field('retrieval_precision')==args.precision)
     table=dataset.to_table(filter=filt)
     rows=table.to_pylist()
     if args.contains:
@@ -49,13 +53,10 @@ def main():
     rows=rows[:args.limit]
 
     if args.format=='jsonl':
-        for r in rows:
-            print(json.dumps(r,ensure_ascii=False))
+        for r in rows: print(json.dumps(r,ensure_ascii=False))
     else:
-        if not rows:
-            return
+        if not rows: return
         w=csv.DictWriter(__import__('sys').stdout,fieldnames=list(rows[0]))
         w.writeheader(); w.writerows(rows)
 
-if __name__=='__main__':
-    main()
+if __name__=='__main__': main()
