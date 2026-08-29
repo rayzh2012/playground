@@ -1,11 +1,11 @@
 {
   "source": "ahua/dataset/26史",
   "source_url": "https://github.com/ahua/dataset/tree/master/26史",
-  "created_utc": "2026-07-23T08:47:55Z",
+  "created_utc": "2026-08-29T01:48:26Z",
   "book_count": 26,
   "total_chars": 36871517,
-  "expected_total_chars": 36871518,
-  "total_char_match": false,
+  "expected_total_chars": 36871517,
+  "total_char_match": true,
   "books": [
     {
       "id": "01",
@@ -278,8 +278,8 @@
       "filename": "附25新元史.txt",
       "bytes": 5994888,
       "chars": 2027141,
-      "expected_chars": 2027142,
-      "char_match": false,
+      "expected_chars": 2027141,
+      "char_match": true,
       "sha256": "50827d6facc6e2540fb5665bf0c77838ca351ecef1527eef097954273d4ef7ae"
     },
     {
