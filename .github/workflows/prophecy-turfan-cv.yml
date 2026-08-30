@@ -19,6 +19,14 @@ on:
         description: 'Hosted mode: newline-separated direct PDF URLs'
         required: false
         default: ''
+      page_start:
+        description: '1-based inclusive page start per PDF'
+        required: true
+        default: '1'
+      page_end:
+        description: '1-based inclusive page end per PDF; 0 = end'
+        required: true
+        default: '0'
       threshold:
         description: 'Candidate score threshold'
         required: true
@@ -26,7 +34,15 @@ on:
       dpi:
         description: 'Render DPI'
         required: true
-        default: '180'
+        default: '140'
+      workers:
+        description: 'Parallel Tesseract workers'
+        required: true
+        default: '4'
+      lang:
+        description: 'Tesseract language; auto chooses installed Chinese packs'
+        required: true
+        default: 'auto'
 
 jobs:
   triage:
@@ -48,8 +64,9 @@ jobs:
             sudo apt-get install -y tesseract-ocr tesseract-ocr-chi-sim tesseract-ocr-chi-tra
           elif command -v brew >/dev/null 2>&1; then
             brew list tesseract >/dev/null 2>&1 || brew install tesseract
-            echo 'NOTE: install Chinese tesseract language packs on the self-hosted Mac if not already present.'
+            echo 'Self-hosted Mac: language selection is auto-detected; install Chinese tessdata if absent.'
           fi
+          tesseract --list-langs || true
 
       - name: Install Python dependencies
         run: python -m pip install --upgrade pip pymupdf
@@ -80,25 +97,30 @@ jobs:
           count=$(find _prophecy_input -maxdepth 1 -type f -iname '*.pdf' | wc -l | tr -d ' ')
           echo "pdf_count=$count" >> "$GITHUB_OUTPUT"
           if [ "$count" -eq 0 ]; then
-            echo 'No PDFs resolved. In self-hosted mode pass local_source_dir; in hosted mode pass direct public URLs.' >&2
+            echo 'No PDFs resolved. Self-hosted: pass local_source_dir. Hosted: pass direct public PDF URLs.' >&2
             exit 21
           fi
 
-      - name: Run CV/OCR triage
+      - name: Run chunked CV/OCR triage
         run: |
           python research/prophecy_turfan/scripts/extract_candidates.py \
             --input-dir _prophecy_input \
             --output-dir _prophecy_output \
             --threshold '${{ inputs.threshold }}' \
-            --dpi '${{ inputs.dpi }}'
+            --dpi '${{ inputs.dpi }}' \
+            --workers '${{ inputs.workers }}' \
+            --lang '${{ inputs.lang }}' \
+            --page-start '${{ inputs.page_start }}' \
+            --page-end '${{ inputs.page_end }}'
 
       - name: Preserve candidate package
         uses: actions/upload-artifact@v4
         with:
-          name: prophecy-turfan-candidates-${{ github.run_id }}
+          name: prophecy-turfan-candidates-${{ github.run_id }}-p${{ inputs.page_start }}-${{ inputs.page_end }}
           path: |
             _prophecy_output/manifest.csv
             _prophecy_output/summary.json
+            _prophecy_output/page_results/*.json
             _prophecy_output/candidates/*.png
             research/prophecy_turfan/prompts/kimi_cv_review.md
           retention-days: 30
@@ -109,5 +131,7 @@ jobs:
         run: |
           echo '## Prophecy × Turfan CV' >> "$GITHUB_STEP_SUMMARY"
           echo "PDFs: ${{ steps.input.outputs.pdf_count }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "Pages requested per PDF: ${{ inputs.page_start }}..${{ inputs.page_end }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "Workers: ${{ inputs.workers }}; DPI: ${{ inputs.dpi }}; lang: ${{ inputs.lang }}" >> "$GITHUB_STEP_SUMMARY"
           echo 'OCR/CV hits are leads only; verify against raw images and archaeological context.' >> "$GITHUB_STEP_SUMMARY"
-          echo 'For Kimi Code, review the uploaded candidate artifact with research/prophecy_turfan/prompts/kimi_cv_review.md.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'For Kimi Code, review the candidate artifact with research/prophecy_turfan/prompts/kimi_cv_review.md.' >> "$GITHUB_STEP_SUMMARY"
