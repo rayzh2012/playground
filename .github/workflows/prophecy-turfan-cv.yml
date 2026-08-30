@@ -1,0 +1,113 @@
+name: Prophecy Turfan CV
+
+on:
+  workflow_dispatch:
+    inputs:
+      runner:
+        description: 'Runner label: ubuntu-latest or self-hosted'
+        required: true
+        default: 'ubuntu-latest'
+        type: choice
+        options:
+          - ubuntu-latest
+          - self-hosted
+      local_source_dir:
+        description: 'Self-hosted only: local directory containing PDFs'
+        required: false
+        default: ''
+      public_urls:
+        description: 'Hosted mode: newline-separated direct PDF URLs'
+        required: false
+        default: ''
+      threshold:
+        description: 'Candidate score threshold'
+        required: true
+        default: '3'
+      dpi:
+        description: 'Render DPI'
+        required: true
+        default: '180'
+
+jobs:
+  triage:
+    runs-on: ${{ inputs.runner }}
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install system OCR
+        shell: bash
+        run: |
+          if command -v apt-get >/dev/null 2>&1; then
+            sudo apt-get update
+            sudo apt-get install -y tesseract-ocr tesseract-ocr-chi-sim tesseract-ocr-chi-tra
+          elif command -v brew >/dev/null 2>&1; then
+            brew list tesseract >/dev/null 2>&1 || brew install tesseract
+            echo 'NOTE: install Chinese tesseract language packs on the self-hosted Mac if not already present.'
+          fi
+
+      - name: Install Python dependencies
+        run: python -m pip install --upgrade pip pymupdf
+
+      - name: Resolve input PDFs
+        id: input
+        shell: bash
+        env:
+          LOCAL_SOURCE_DIR: ${{ inputs.local_source_dir }}
+          PUBLIC_URLS: ${{ inputs.public_urls }}
+        run: |
+          mkdir -p _prophecy_input
+          if [ -n "$LOCAL_SOURCE_DIR" ]; then
+            if [ ! -d "$LOCAL_SOURCE_DIR" ]; then
+              echo "Local source directory does not exist: $LOCAL_SOURCE_DIR" >&2
+              exit 20
+            fi
+            find "$LOCAL_SOURCE_DIR" -type f -iname '*.pdf' -print0 | xargs -0 -I{} cp -n "{}" _prophecy_input/
+          fi
+          if [ -n "$PUBLIC_URLS" ]; then
+            i=0
+            while IFS= read -r url; do
+              [ -z "$url" ] && continue
+              i=$((i+1))
+              curl -L --fail --retry 3 "$url" -o "_prophecy_input/url_${i}.pdf"
+            done <<< "$PUBLIC_URLS"
+          fi
+          count=$(find _prophecy_input -maxdepth 1 -type f -iname '*.pdf' | wc -l | tr -d ' ')
+          echo "pdf_count=$count" >> "$GITHUB_OUTPUT"
+          if [ "$count" -eq 0 ]; then
+            echo 'No PDFs resolved. In self-hosted mode pass local_source_dir; in hosted mode pass direct public URLs.' >&2
+            exit 21
+          fi
+
+      - name: Run CV/OCR triage
+        run: |
+          python research/prophecy_turfan/scripts/extract_candidates.py \
+            --input-dir _prophecy_input \
+            --output-dir _prophecy_output \
+            --threshold '${{ inputs.threshold }}' \
+            --dpi '${{ inputs.dpi }}'
+
+      - name: Preserve candidate package
+        uses: actions/upload-artifact@v4
+        with:
+          name: prophecy-turfan-candidates-${{ github.run_id }}
+          path: |
+            _prophecy_output/manifest.csv
+            _prophecy_output/summary.json
+            _prophecy_output/candidates/*.png
+            research/prophecy_turfan/prompts/kimi_cv_review.md
+          retention-days: 30
+          if-no-files-found: error
+
+      - name: Job summary
+        shell: bash
+        run: |
+          echo '## Prophecy × Turfan CV' >> "$GITHUB_STEP_SUMMARY"
+          echo "PDFs: ${{ steps.input.outputs.pdf_count }}" >> "$GITHUB_STEP_SUMMARY"
+          echo 'OCR/CV hits are leads only; verify against raw images and archaeological context.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'For Kimi Code, review the uploaded candidate artifact with research/prophecy_turfan/prompts/kimi_cv_review.md.' >> "$GITHUB_STEP_SUMMARY"
