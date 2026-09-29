@@ -24,7 +24,7 @@ jobs:
         run: python -m pip install --upgrade gdown rarfile
 
       - name: Download public Exos Asset Dumps archive
-        run: gdown --id 1lnN7J9jHGkGLN0-OY7GXn6-C3EzOJz-I -O exos-asset-dumps.rar
+        run: gdown 1lnN7J9jHGkGLN0-OY7GXn6-C3EzOJz-I -O exos-asset-dumps.rar
 
       - name: Build archive index without extracting assets
         run: |
