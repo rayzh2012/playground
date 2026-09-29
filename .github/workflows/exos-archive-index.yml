@@ -1,0 +1,44 @@
+name: Exos archive index
+
+on:
+  push:
+    branches: [exos-preservation-index]
+    paths:
+      - '.github/workflows/exos-archive-index.yml'
+  workflow_dispatch:
+
+jobs:
+  index-asset-dumps:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: exos-preservation-index
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install listing tools
+        run: python -m pip install --upgrade gdown rarfile
+
+      - name: Download public Exos Asset Dumps archive
+        run: gdown --id 1lnN7J9jHGkGLN0-OY7GXn6-C3EzOJz-I -O exos-asset-dumps.rar
+
+      - name: Build archive index without extracting assets
+        run: |
+          python tools/index_exos_archive.py exos-asset-dumps.rar exos_asset_dumps_index.csv > exos_asset_dumps_summary.txt
+          grep -Ei 'rachel|ramge|awakening|animation|\.fbx' exos_asset_dumps_summary.txt > exos_priority_hits.txt || true
+          wc -l exos_asset_dumps_index.csv exos_priority_hits.txt
+
+      - name: Upload index only
+        uses: actions/upload-artifact@v4
+        with:
+          name: exos-asset-dumps-index
+          path: |
+            exos_asset_dumps_index.csv
+            exos_asset_dumps_index.json
+            exos_asset_dumps_summary.txt
+            exos_priority_hits.txt
+          retention-days: 30
