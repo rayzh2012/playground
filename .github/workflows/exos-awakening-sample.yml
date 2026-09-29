@@ -1,0 +1,83 @@
+name: Exos Awakening sample extraction
+
+on:
+  push:
+    branches: [exos-preservation-index]
+    paths:
+      - '.github/workflows/exos-awakening-sample.yml'
+  workflow_dispatch:
+
+jobs:
+  extract-sample:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: exos-preservation-index
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install tools
+        run: |
+          python -m pip install --upgrade gdown
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq libarchive-tools
+
+      - name: Download public Exos Asset Dumps archive
+        run: gdown 1lnN7J9jHGkGLN0-OY7GXn6-C3EzOJz-I -O exos-asset-dumps.rar
+
+      - name: Extract base and Awakening research sample only
+        run: |
+          mkdir -p subset
+          bsdtar -xf exos-asset-dumps.rar -C subset \
+            --include 'Exos Heroes - Asset Dumps/Animations/Rachel_Type01_InGame/*' \
+            --include 'Exos Heroes - Asset Dumps/Animations/Rachel_Type01_InLobby/*' \
+            --include 'Exos Heroes - Asset Dumps/Animations/Rachel_Type01_InTown/*' \
+            --include 'Exos Heroes - Asset Dumps/Animations/Rachel_Type40_InGame/*' \
+            --include 'Exos Heroes - Asset Dumps/Animations/Rachel_Type40_InLobby/*' \
+            --include 'Exos Heroes - Asset Dumps/Animations/Rachel_Type40_InTown/*' \
+            --include 'Exos Heroes - Asset Dumps/Animations/Ramge_Type01_InGame/*' \
+            --include 'Exos Heroes - Asset Dumps/Animations/Ramge_Type01_InLobby/*' \
+            --include 'Exos Heroes - Asset Dumps/Animations/Ramge_Type01_InTown/*' \
+            --include 'Exos Heroes - Asset Dumps/Animations/Ramge_Type20_InGame/*' \
+            --include 'Exos Heroes - Asset Dumps/Animations/Ramge_Type20_InLobby/*' \
+            --include 'Exos Heroes - Asset Dumps/Animations/Ramge_Type20_InTown/*' \
+            --include 'Exos Heroes - Asset Dumps/Textures/texture/staticcharacter/rachel/ILLUST_Rachel.png' \
+            --include 'Exos Heroes - Asset Dumps/Textures/texture/staticcharacter/rachel/ILLUST_Rachel_Type40.png' \
+            --include 'Exos Heroes - Asset Dumps/Textures/texture/staticcharacter/ramge/ILLUST_Ramge.png' \
+            --include 'Exos Heroes - Asset Dumps/Textures/texture/staticcharacter/ramge/ILLUST_Ramge_Type20.png' \
+            --include 'Exos Heroes - Asset Dumps/Textures/texture/characterhexab/PR_Rachel.png' \
+            --include 'Exos Heroes - Asset Dumps/Textures/texture/characterhexab/costumes/PR_Rachel_Type40.png' \
+            --include 'Exos Heroes - Asset Dumps/Textures/texture/characterhexab/PR_Ramge.png' \
+            --include 'Exos Heroes - Asset Dumps/Textures/texture/characterhexab/costumes/PR_Ramge_Type20.png' \
+            --include 'Exos Heroes - Asset Dumps/Textures/texture/equipmentgacha/*Awakening_Rachel_Type40.png' \
+            --include 'Exos Heroes - Asset Dumps/Textures/texture/equipmentgacha/*Awakening_Ramge_Type20.png'
+          find subset -type f -printf '%P\n' | sort > subset_filelist.txt
+          du -sh subset
+          wc -l subset_filelist.txt
+          python - <<'PY'
+          import os,hashlib,csv
+          root='subset'; rows=[]
+          for dp,_,fs in os.walk(root):
+              for fn in fs:
+                  p=os.path.join(dp,fn); rel=os.path.relpath(p,root)
+                  h=hashlib.sha256()
+                  with open(p,'rb') as f:
+                      for b in iter(lambda:f.read(1024*1024),b''): h.update(b)
+                  rows.append((rel,os.path.getsize(p),h.hexdigest()))
+          with open('subset_sha256.csv','w',newline='',encoding='utf-8') as f:
+              w=csv.writer(f); w.writerow(['path','size_bytes','sha256']); w.writerows(sorted(rows))
+          PY
+
+      - name: Upload research sample
+        uses: actions/upload-artifact@v4
+        with:
+          name: exos-rachel-ramge-base-awakening-sample
+          path: |
+            subset/
+            subset_filelist.txt
+            subset_sha256.csv
+          retention-days: 1
